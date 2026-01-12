@@ -81,7 +81,7 @@
 - [x] secret rotation (manual) + политика интервала
 - [x] secret rotation (scheduled) + фоновые задачи
 - [x] уведомления: expiring soon / rotated
-- [ ] интеграция rotation с SSH passwords/API tokens (MVP)
+- [x] интеграция rotation с SSH passwords/API tokens (MVP)
 - [ ] dynamic secrets (опционально): TTL creds + auto revoke
 
 ## Фаза 13: SSH & Remote Operations
@@ -96,9 +96,9 @@
 - [x] audit log UI: фильтры + экспорт + before/after + source/IP
 
 ## Фаза 15: Интеграции и масштабирование
-- [ ] git integration: playbooks из repo + auto-sync + commit hash в run history
+- [x] git integration: playbooks из repo + auto-sync + commit hash в run history
 - [x] notifications: outbound webhook (run/approval/host/secret)
-- [ ] notifications: Slack/Telegram/Email (failed run/approval needed/secret expiring/host offline)
+- [x] notifications: Slack/Telegram/Email (failed run/approval needed/secret expiring/host offline)
 - [x] webhooks: inbound triggers + outbound notifications
 - [ ] plugin system (inventory/secrets/automation backends)
 - [ ] HA/scale: multiple workers, distributed locks, sharding

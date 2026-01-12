@@ -23,6 +23,7 @@ from app.core.config import settings
 from app.db.models import JobRun, JobStatus, Playbook, User
 from app.db.models import Host
 from app.services.audit import audit_log
+from app.services.git_sync import GitSyncError, sync_playbook_repo
 from app.services.notifications import notify_event
 from app.services.projects import ProjectAccessDenied, ProjectNotFound, resolve_current_project_id
 
@@ -83,6 +84,50 @@ async def claim_run(
     if playbook.project_id != project_id:
         raise HTTPException(status_code=500, detail="Плейбук из другого проекта")
 
+    if playbook.repo_auto_sync and playbook.repo_url and playbook.repo_playbook_path:
+        try:
+            result = sync_playbook_repo(
+                playbook_id=playbook.id,
+                repo_url=playbook.repo_url,
+                repo_ref=playbook.repo_ref,
+                repo_playbook_path=playbook.repo_playbook_path,
+            )
+            playbook.stored_content = result["content"]
+            playbook.repo_last_commit = result["commit"]
+            playbook.repo_last_sync_at = datetime.utcnow()
+            playbook.repo_sync_status = "success"
+            playbook.repo_sync_message = None
+            snapshot = run.target_snapshot or {}
+            snapshot["repo_commit"] = playbook.repo_last_commit
+            run.target_snapshot = snapshot
+            await db.commit()
+            await db.refresh(playbook)
+        except GitSyncError as exc:
+            playbook.repo_sync_status = "failed"
+            playbook.repo_sync_message = str(exc)[:500]
+            playbook.repo_last_sync_at = datetime.utcnow()
+            run.status = JobStatus.failed
+            run.finished_at = datetime.utcnow()
+            run.logs = (run.logs or "") + f"==> git sync failed: {exc}\n"
+            await db.commit()
+            await audit_log(
+                db,
+                project_id=project_id,
+                actor=user.get("sub"),
+                actor_role=user.get("role"),
+                action="run.git_sync_failed",
+                entity_type="run",
+                entity_id=run.id,
+                meta={"playbook_id": playbook.id, "error": str(exc)[:200]},
+            )
+            await notify_event(
+                db,
+                project_id=project_id,
+                event="run.failed",
+                payload={"run_id": run.id, "playbook_id": playbook.id, "status": "failed", "reason": "git_sync"},
+            )
+            raise HTTPException(status_code=400, detail=f"Git sync failed: {exc}") from exc
+
     run.status = JobStatus.running
     run.started_at = datetime.utcnow()
     await db.commit()
@@ -105,6 +150,7 @@ async def claim_run(
             "name": playbook.name,
             "stored_content": playbook.stored_content,
             "repo_path": playbook.repo_path,
+            "repo_commit": playbook.repo_last_commit,
             "variables": playbook.variables or {},
         },
     )

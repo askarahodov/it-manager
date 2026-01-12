@@ -550,6 +550,32 @@ body {
   flex-wrap: wrap;
 }
 
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.tab-button {
+  background: #0f172a;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #e2e8f0;
+  padding: 0.45rem 0.9rem;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.tab-button:hover {
+  border-color: rgba(148, 163, 184, 0.6);
+}
+
+.tab-button.active {
+  background: #1f2937;
+  border-color: rgba(56, 189, 248, 0.5);
+}
+
 .checkbox-row {
   display: flex;
   align-items: center;

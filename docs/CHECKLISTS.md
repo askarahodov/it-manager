@@ -81,7 +81,7 @@
 ### Secrets Enterprise
 - [x] rotation policies (manual) + интервалы
 - [x] rotation policies (scheduled) + фоновые задачи
-- [ ] интеграции rotation (SSH password / API token)
+- [x] интеграции rotation (SSH password / API token)
 - [x] уведомления: expiring soon / rotated
 - [ ] dynamic secrets (опционально): TTL creds + auto revoke
 
@@ -97,9 +97,9 @@
 - [x] audit log UI: фильтры + экспорт + before/after + source/IP
 
 ### Интеграции и Ops
-- [ ] git integration: auto-sync + commit hash в execution history
+- [x] git integration: auto-sync + commit hash в execution history
 - [x] notifications: outbound webhook
-- [ ] notifications: Slack/Telegram/Email
+- [x] notifications: Slack/Telegram/Email
 - [x] webhooks (inbound/outbound)
 - [ ] plugin system (inventory/secrets/automation backends)
 - [ ] scale/HA: multiple workers + distributed locks + sharding

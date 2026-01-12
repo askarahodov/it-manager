@@ -86,7 +86,13 @@ async def list_secrets(
     query = await db.execute(
         select(Secret)
         .where(or_(Secret.project_id == project_id, Secret.project_id.is_(None)))
-        .where(or_(Secret.tags["system"].astext.is_(None), Secret.tags["system"].astext != "rotation_pending"))
+        .where(
+            or_(
+                Secret.tags.is_(None),
+                Secret.tags["system"].astext.is_(None),
+                Secret.tags["system"].astext != "rotation_pending",
+            )
+        )
         .order_by(Secret.name)
     )
     return query.scalars().all()
@@ -289,7 +295,7 @@ async def rotate_secret_apply(
         project_id=project_id,
         name=f"_rotation_pending_{secret.id}_{int(datetime.utcnow().timestamp())}",
         type=secret.type,
-        scope=secret.scope,
+        scope="project",
         description="Rotation helper secret",
         tags={"system": "rotation_pending", "target_secret_id": str(secret.id)},
         encrypted_value=encrypted_new,

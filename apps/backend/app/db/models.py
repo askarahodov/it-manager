@@ -3,7 +3,7 @@
 from datetime import datetime
 import enum
 
-from sqlalchemy import Column, DateTime, Enum, ForeignKey, Integer, String, Text, func
+from sqlalchemy import Boolean, Column, DateTime, Enum, ForeignKey, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import declarative_base
 from sqlalchemy.orm import relationship
@@ -212,6 +212,14 @@ class Playbook(Base):
     project_id = Column(Integer, ForeignKey("projects.id"), nullable=False, default=1, index=True)
     name = Column(String, nullable=False)
     description = Column(Text, nullable=True)
+    repo_url = Column(String, nullable=True)
+    repo_ref = Column(String, nullable=True)
+    repo_playbook_path = Column(String, nullable=True)
+    repo_auto_sync = Column(Boolean, default=False, nullable=False)
+    repo_last_sync_at = Column(DateTime, nullable=True)
+    repo_last_commit = Column(String, nullable=True)
+    repo_sync_status = Column(String, nullable=True)
+    repo_sync_message = Column(Text, nullable=True)
     repo_path = Column(String, nullable=True)
     stored_content = Column(Text, nullable=True)
     inventory_scope = Column(JSONB, default=list)

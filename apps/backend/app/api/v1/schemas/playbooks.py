@@ -26,6 +26,23 @@ class PlaybookSchedule(BaseModel):
 class PlaybookBase(BaseModel):
     name: str = Field(..., min_length=2)
     description: Optional[str] = None
+    repo_url: Optional[str] = Field(
+        default=None,
+        description="Git URL репозитория (опционально).",
+    )
+    repo_ref: Optional[str] = Field(
+        default=None,
+        description="Branch/tag/commit для checkout (опционально).",
+    )
+    repo_playbook_path: Optional[str] = Field(
+        default=None,
+        description="Путь до playbook.yml внутри репозитория.",
+    )
+    repo_auto_sync: bool = False
+    repo_last_sync_at: Optional[datetime] = None
+    repo_last_commit: Optional[str] = None
+    repo_sync_status: Optional[str] = None
+    repo_sync_message: Optional[str] = None
     stored_content: Optional[str] = Field(
         default=None,
         description="YAML содержимое плейбука (вариант хранения MVP).",
@@ -46,6 +63,10 @@ class PlaybookCreate(PlaybookBase):
 class PlaybookUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
+    repo_url: Optional[str] = None
+    repo_ref: Optional[str] = None
+    repo_playbook_path: Optional[str] = None
+    repo_auto_sync: Optional[bool] = None
     stored_content: Optional[str] = None
     repo_path: Optional[str] = None
     inventory_scope: Optional[list[dict[str, Any]]] = None

@@ -78,14 +78,16 @@ E2E тесты живут в `apps/frontend/tests-e2e` и поднимают в�
 - Advanced host health: snapshot (uptime/load/memory/disk) + history + facts через Ansible.
 - Группы хостов: static/dynamic, rule engine, пересчёт состава (воркером и вручную).
 - Vault-секреты (AES-GCM) с `/api/v1/secrets` и `/api/v1/secrets/{id}/reveal`, включая тип `private_key` с passphrase, scope `global`, `expires_at`, rotation interval и ручную ротацию (`/api/v1/secrets/{id}/rotate`).
+- Ротация SSH password с применением на хостах через системный playbook (`/api/v1/secrets/{id}/rotate-apply`).
 - Плановая ротация секретов (password/token) выполняется воркером по интервалу (`WORKER_ROTATION_POLL_SECONDS`).
 - Automation: CRUD плейбуков, playbook templates/instances, запуск вручную/по расписанию, история и live-логи (SSE).
+- Git integration: playbooks из repo + ручной sync и auto-sync на запуске, commit hash сохраняется в run history.
 - Approval flow для prod запусков: requester/approver, diff параметров, UI approvals.
 - Event-driven triggers: webhook, host created/tags changed, secret rotated.
 - Надёжность Automation: таймауты выполнения, ограниченные ретраи на временные сбои, watchdog зависших запусков (running слишком долго).
 - Расписания Automation (MVP): interval/cron, выполняются воркером (см. ADR 0002).
 - Audit log: события CRUD/SSH/Automation с фильтрами, экспортом и source IP (admin-only).
-- Notifications (webhook): события run/approval/host/secret на внешний URL.
+- Notifications (webhook/slack/telegram/email): события run/approval/host/secret на внешний URL.
 - React/Vite шаблон admin layout и Docker Compose окружение.
 - React/Vite страницы Dashboard + Hosts (таблица, карточка, форма).
 - React/Vite страницы Groups + Secrets + Settings (login/logout, reveal для admin, audit log).
@@ -147,9 +149,21 @@ Integration-тесты: `docker compose -f deploy/docker-compose.yml exec -T -w 
 
 ## Что дальше
 
-- notifications (Slack/Telegram/Email).
-- secret rotation policies + интеграции (SSH/API tokens).
 - git integration для playbooks + auto-sync.
-- session recording для SSH и remote actions.
+- dynamic secrets (TTL creds + auto revoke).
+- plugin system (inventory/secrets/automation backends).
+- HA/scale: multiple workers + distributed locks + sharding.
 
 > Вся платформа готова к запуску `docker compose -f deploy/docker-compose.yml up -d`.
+
+## Git playbooks (как пользоваться)
+
+1) В Automation создайте/откройте плейбук и заполните:
+   - `Repo URL` (git URL),
+   - `Ref` (branch/tag/commit, опционально),
+   - `Playbook path` (путь до playbook.yml в репозитории).
+2) Нажмите `Sync now` (или включите auto-sync перед запуском).
+3) При каждом запуске commit сохраняется в history.
+
+Переменные окружения:
+- `REPO_SYNC_DIR` — каталог для checkout репозиториев (по умолчанию `/app/data/repos`).

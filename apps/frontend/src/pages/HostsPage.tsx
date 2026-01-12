@@ -95,6 +95,7 @@ function HostsPage() {
   const [terminalHost, setTerminalHost] = useState<Host | null>(null);
   const [showTerminal, setShowTerminal] = useState(false);
   const [terminalFull, setTerminalFull] = useState(false);
+  const [hostsTab, setHostsTab] = useState<"list" | "form">("list");
 
   const canManageHosts = user?.role === "admin" || user?.role === "operator";
   const canCheckHosts = canManageHosts;
@@ -202,12 +203,14 @@ function HostsPage() {
       credential_id: host.credential_id ?? "",
       check_method: host.check_method ?? "tcp",
     });
+    setHostsTab("form");
   };
 
   const handleResetForm = () => {
     setFormMode("create");
     setActiveHost(null);
     setFormState({ ...defaultForm });
+    setHostsTab("list");
   };
 
   const handleChange = (event: ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
@@ -356,7 +359,25 @@ function HostsPage() {
         </div>
       </header>
 
+      <div className="tabs">
+        <button
+          type="button"
+          className={`tab-button ${hostsTab === "list" ? "active" : ""}`}
+          onClick={() => setHostsTab("list")}
+        >
+          Инвентарь
+        </button>
+        <button
+          type="button"
+          className={`tab-button ${hostsTab === "form" ? "active" : ""}`}
+          onClick={() => setHostsTab("form")}
+        >
+          {formMode === "create" ? "Добавить" : "Редактировать"}
+        </button>
+      </div>
+
       <div className="grid">
+        {hostsTab === "list" && (
         <div className="panel hosts-list">
           <div className="panel-title">
             <h2>Список хостов</h2>
@@ -574,7 +595,8 @@ function HostsPage() {
             </div>
           )}
         </div>
-
+        )}
+        {hostsTab === "form" && (
         <div className="panel hosts-form">
           <div className="panel-title">
             <h2>{formMode === "create" ? "Добавить хост" : "Редактировать хост"}</h2>
@@ -651,6 +673,7 @@ function HostsPage() {
             Изменения отправляются на backend; для действительных ответов предварительно выполните `POST /api/v1/auth/login`.
           </p>
         </div>
+        )}
         {terminalHost && showTerminal && (
           <div className={`modal-overlay ${terminalFull ? "full" : ""}`}>
             <div className={`modal ${terminalFull ? "full" : ""}`}>

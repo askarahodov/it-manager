@@ -123,6 +123,7 @@ function SettingsPage() {
   const [notifSecret, setNotifSecret] = useState("");
   const [notifEnabled, setNotifEnabled] = useState(true);
   const [notifEvents, setNotifEvents] = useState<string[]>([]);
+  const [settingsTab, setSettingsTab] = useState<"session" | "projects" | "users" | "audit" | "notifications">("session");
 
   const selectedAccessUser = useMemo(
     () => (accessUserId ? users.find((u) => u.id === accessUserId) ?? null : null),
@@ -611,7 +612,50 @@ function SettingsPage() {
         </div>
       </header>
 
+      <div className="tabs">
+        <button
+          type="button"
+          className={`tab-button ${settingsTab === "session" ? "active" : ""}`}
+          onClick={() => setSettingsTab("session")}
+        >
+          Сессия
+        </button>
+        <button
+          type="button"
+          className={`tab-button ${settingsTab === "projects" ? "active" : ""}`}
+          onClick={() => setSettingsTab("projects")}
+        >
+          Проекты
+        </button>
+        {user?.role === "admin" && (
+          <>
+            <button
+              type="button"
+              className={`tab-button ${settingsTab === "users" ? "active" : ""}`}
+              onClick={() => setSettingsTab("users")}
+            >
+              Пользователи
+            </button>
+            <button
+              type="button"
+              className={`tab-button ${settingsTab === "audit" ? "active" : ""}`}
+              onClick={() => setSettingsTab("audit")}
+            >
+              Audit log
+            </button>
+            <button
+              type="button"
+              className={`tab-button ${settingsTab === "notifications" ? "active" : ""}`}
+              onClick={() => setSettingsTab("notifications")}
+            >
+              Notifications
+            </button>
+          </>
+        )}
+      </div>
+
       <div className="grid">
+          {settingsTab === "session" && (
           <div className="panel">
             <h2>Сессия</h2>
             {status === "authenticated" && user ? (
@@ -658,8 +702,9 @@ function SettingsPage() {
             </>
           )}
         </div>
+        )}
 
-        {status === "authenticated" && token && (
+        {settingsTab === "projects" && status === "authenticated" && token && (
           <div className="panel">
             <div className="panel-title">
               <h2>Проекты</h2>
@@ -772,7 +817,7 @@ function SettingsPage() {
           </div>
         )}
 
-        {status === "authenticated" && user?.role === "admin" && (
+        {settingsTab === "users" && status === "authenticated" && user?.role === "admin" && (
           <div className="panel">
             <div className="panel-title">
               <h2>Пользователи</h2>
@@ -1048,7 +1093,7 @@ function SettingsPage() {
           </div>
         )}
 
-        {status === "authenticated" && user?.role === "admin" && (
+        {settingsTab === "audit" && status === "authenticated" && user?.role === "admin" && (
           <div className="panel">
             <div className="panel-title">
               <h2>Audit log</h2>
@@ -1160,7 +1205,7 @@ function SettingsPage() {
           </div>
         )}
 
-        {status === "authenticated" && user?.role === "admin" && (
+        {settingsTab === "notifications" && status === "authenticated" && user?.role === "admin" && (
           <div className="panel">
             <div className="panel-title">
               <h2>Notifications (webhook)</h2>

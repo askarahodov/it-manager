@@ -38,6 +38,7 @@ services:
       MASTER_KEY: ${MASTER_KEY:-change-me}
       SECRET_KEY: ${SECRET_KEY:-change-me}
       ARTIFACTS_DIR: ${ARTIFACTS_DIR:-/var/ansible}
+      REPO_SYNC_DIR: ${REPO_SYNC_DIR:-/app/data/repos}
       FRONTEND_CORS_ORIGINS: ${FRONTEND_CORS_ORIGINS:-http://localhost:4173}
       BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-admin@it.local}
       BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-admin123}

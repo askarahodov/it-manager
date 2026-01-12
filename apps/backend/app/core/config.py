@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     master_key: str = "change-me"
     secret_key: str = "change-me"
     artifacts_dir: str = "/var/ansible"
+    repo_sync_dir: str = "/app/data/repos"
     bootstrap_admin_email: str = "admin@it.local"
     bootstrap_admin_password: str = "admin123"
     json_logs: bool = False

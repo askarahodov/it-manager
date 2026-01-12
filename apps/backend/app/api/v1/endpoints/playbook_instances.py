@@ -246,6 +246,7 @@ async def run_instance(
             "dry_run": payload.dry_run,
             "instance_id": instance.id,
             "template_id": instance.template_id,
+            "repo_commit": playbook.repo_last_commit,
             "params_before": defaults_vars,
             "params_after": merged_vars,
         },

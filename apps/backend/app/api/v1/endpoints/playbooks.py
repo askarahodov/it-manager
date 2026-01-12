@@ -1,5 +1,6 @@
 import logging
 import secrets
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from sqlalchemy import select
@@ -13,6 +14,7 @@ from app.db.models import GroupType, Host, HostGroup, JobRun, JobStatus, Playboo
 from app.db.models import ApprovalRequest, ApprovalStatus
 from app.services.access import apply_group_scope, apply_host_scope
 from app.services.audit import audit_log
+from app.services.git_sync import GitSyncError, sync_playbook_repo
 from app.services.notifications import notify_event
 from app.services.queue import enqueue_run
 
@@ -26,6 +28,15 @@ def _require_admin(principal) -> None:
 
 def _webhook_path(playbook_id: int, token: str) -> str:
     return f"/api/v1/playbooks/{playbook_id}/webhook?token={token}"
+
+
+def _validate_repo_fields(repo_url: str | None, repo_playbook_path: str | None, repo_auto_sync: bool | None) -> None:
+    if repo_url and not repo_playbook_path:
+        raise HTTPException(status_code=400, detail="repo_playbook_path обязателен при repo_url")
+    if repo_playbook_path and not repo_url:
+        raise HTTPException(status_code=400, detail="repo_url обязателен при repo_playbook_path")
+    if repo_auto_sync and not repo_url:
+        raise HTTPException(status_code=400, detail="repo_auto_sync требует repo_url")
 
 
 async def _resolve_group_hosts(db: AsyncSession, group: HostGroup, principal) -> list[Host]:
@@ -119,6 +130,7 @@ async def create_playbook(
     principal=Depends(require_permission(Permission.ansible_edit)),
     project_id: int = Depends(get_current_project_id),
 ):
+    _validate_repo_fields(payload.repo_url, payload.repo_playbook_path, payload.repo_auto_sync)
     data = payload.model_dump()
     schedule = data.pop("schedule", None)
     variables = data.get("variables") or {}
@@ -192,6 +204,53 @@ async def rotate_webhook_token(
     return PlaybookWebhookRead(token=playbook.webhook_token, url_path=_webhook_path(playbook.id, playbook.webhook_token))
 
 
+@router.post("/{playbook_id}/sync", response_model=PlaybookRead)
+async def sync_playbook(
+    playbook_id: int,
+    db: AsyncSession = Depends(get_db),
+    principal=Depends(require_permission(Permission.ansible_edit)),
+    project_id: int = Depends(get_current_project_id),
+):
+    playbook = await db.get(Playbook, playbook_id)
+    if not playbook or playbook.project_id != project_id:
+        raise HTTPException(status_code=404, detail="Плейбук не найден")
+    if not playbook.repo_url or not playbook.repo_playbook_path:
+        raise HTTPException(status_code=400, detail="repo_url/repo_playbook_path не настроены")
+
+    try:
+        result = sync_playbook_repo(
+            playbook_id=playbook.id,
+            repo_url=playbook.repo_url,
+            repo_ref=playbook.repo_ref,
+            repo_playbook_path=playbook.repo_playbook_path,
+        )
+        playbook.stored_content = result["content"]
+        playbook.repo_last_commit = result["commit"]
+        playbook.repo_last_sync_at = datetime.utcnow()
+        playbook.repo_sync_status = "success"
+        playbook.repo_sync_message = None
+        await db.commit()
+        await db.refresh(playbook)
+        playbook.schedule = _extract_schedule(playbook.variables)
+        await audit_log(
+            db,
+            project_id=project_id,
+            actor=principal.email,
+            actor_role=str(principal.role.value),
+            action="playbook.sync",
+            entity_type="playbook",
+            entity_id=playbook.id,
+            meta={"name": playbook.name, "commit": playbook.repo_last_commit},
+        )
+        return playbook
+    except GitSyncError as exc:
+        playbook.repo_sync_status = "failed"
+        playbook.repo_sync_message = str(exc)[:500]
+        playbook.repo_last_sync_at = datetime.utcnow()
+        await db.commit()
+        raise HTTPException(status_code=400, detail=f"Git sync failed: {exc}") from exc
+
+
 @router.post("/{playbook_id}/webhook", response_model=RunRead, status_code=status.HTTP_201_CREATED)
 async def run_playbook_webhook(
     playbook_id: int,
@@ -253,6 +312,7 @@ async def run_playbook_webhook(
             "host_ids": payload.host_ids,
             "extra_vars": payload.extra_vars,
             "dry_run": payload.dry_run,
+            "repo_commit": playbook.repo_last_commit,
             "params_before": {},
             "params_after": payload.extra_vars or {},
         },
@@ -363,6 +423,7 @@ async def run_playbook(
             "host_ids": payload.host_ids,
             "extra_vars": payload.extra_vars,
             "dry_run": payload.dry_run,
+            "repo_commit": playbook.repo_last_commit,
             "params_before": {},
             "params_after": payload.extra_vars or {},
         },
@@ -431,6 +492,10 @@ async def update_playbook(
         raise HTTPException(status_code=404, detail="Плейбук не найден")
 
     updates = payload.model_dump(exclude_unset=True)
+    repo_url = updates.get("repo_url", playbook.repo_url)
+    repo_playbook_path = updates.get("repo_playbook_path", playbook.repo_playbook_path)
+    repo_auto_sync = updates.get("repo_auto_sync", playbook.repo_auto_sync)
+    _validate_repo_fields(repo_url, repo_playbook_path, repo_auto_sync)
     schedule = updates.pop("schedule", None)
     if "variables" in updates and updates["variables"] is not None:
         playbook.variables = updates.pop("variables")

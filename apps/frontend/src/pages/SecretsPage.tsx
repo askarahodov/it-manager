@@ -92,6 +92,7 @@ function SecretsPage() {
   const [rotateValue, setRotateValue] = useState("");
   const [rotatePassphrase, setRotatePassphrase] = useState("");
   const [rotateApply, setRotateApply] = useState(false);
+  const [secretsTab, setSecretsTab] = useState<"list" | "manage">("list");
 
   const isAdmin = user?.role === "admin";
   const canReveal = isAdmin;
@@ -254,6 +255,7 @@ function SecretsPage() {
       passphrase: "",
     });
     setRevealValue(null);
+    setSecretsTab("manage");
   };
 
   const handleReset = () => {
@@ -261,6 +263,7 @@ function SecretsPage() {
     setForm({ ...defaultForm });
     setError(null);
     setRevealValue(null);
+    setSecretsTab("list");
   };
 
   const startRotate = (secret: Secret) => {
@@ -353,8 +356,26 @@ function SecretsPage() {
         </div>
       </header>
 
+      <div className="tabs">
+        <button
+          type="button"
+          className={`tab-button ${secretsTab === "list" ? "active" : ""}`}
+          onClick={() => setSecretsTab("list")}
+        >
+          Список
+        </button>
+        <button
+          type="button"
+          className={`tab-button ${secretsTab === "manage" ? "active" : ""}`}
+          onClick={() => setSecretsTab("manage")}
+        >
+          {editId ? "Редактировать" : "Создать"}
+        </button>
+      </div>
+
       {error && <p className="text-error">{error}</p>}
       <div className="grid">
+        {secretsTab === "list" && (
         <div className="panel">
           <div className="panel-title">
             <h2>Список секретов</h2>
@@ -465,7 +486,8 @@ function SecretsPage() {
             </div>
           )}
         </div>
-
+        )}
+        {secretsTab === "manage" && (
         <div className="panel">
             <div className="panel-title">
             <h2>{editId ? "Редактировать секрет" : "Создать секрет"}</h2>
@@ -601,6 +623,7 @@ function SecretsPage() {
             </div>
           )}
         </div>
+        )}
       </div>
     </div>
   );

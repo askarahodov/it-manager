@@ -92,11 +92,18 @@
 - [x] Triggers: CRUD интерфейс (host_created/host_tags_changed/secret_rotated).
 - [x] Webhook: генерация/просмотр токена плейбука + подсказки.
 
+## Automation: Git integration (UI)
+
+- [x] Поля repo URL/ref/path для плейбука.
+- [x] Кнопка ручного sync.
+- [x] Отображение commit hash и статуса sync.
+
 ## Secrets: Rotation (UI)
 
 - [x] Поле `expires_at` и отображение в списке секретов.
 - [x] Политика ротации: interval (дни) + next rotation.
 - [x] Ручная ротация с вводом нового значения.
+- [x] Опция “применить ротацию на хостах” для password-секретов.
 
 ## Notifications (UI)
 

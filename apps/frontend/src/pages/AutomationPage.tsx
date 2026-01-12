@@ -12,6 +12,14 @@ type Playbook = {
   name: string;
   description?: string | null;
   stored_content?: string | null;
+  repo_url?: string | null;
+  repo_ref?: string | null;
+  repo_playbook_path?: string | null;
+  repo_auto_sync?: boolean;
+  repo_last_sync_at?: string | null;
+  repo_last_commit?: string | null;
+  repo_sync_status?: string | null;
+  repo_sync_message?: string | null;
   variables: Record<string, unknown>;
   schedule?: {
     enabled: boolean;
@@ -130,6 +138,16 @@ function AutomationPage() {
   const [pbName, setPbName] = useState("");
   const [pbDescription, setPbDescription] = useState("");
   const [pbYaml, setPbYaml] = useState(defaultPlaybookYaml);
+  const [pbRepoUrl, setPbRepoUrl] = useState("");
+  const [pbRepoRef, setPbRepoRef] = useState("");
+  const [pbRepoPlaybookPath, setPbRepoPlaybookPath] = useState("");
+  const [pbRepoAutoSync, setPbRepoAutoSync] = useState(false);
+  const [pbRepoLastCommit, setPbRepoLastCommit] = useState<string | null>(null);
+  const [pbRepoLastSyncAt, setPbRepoLastSyncAt] = useState<string | null>(null);
+  const [pbRepoSyncStatus, setPbRepoSyncStatus] = useState<string | null>(null);
+  const [pbRepoSyncMessage, setPbRepoSyncMessage] = useState<string | null>(null);
+  const [pbRepoSyncLoading, setPbRepoSyncLoading] = useState(false);
+  const [automationTab, setAutomationTab] = useState<"playbooks" | "templates" | "triggers" | "runs">("playbooks");
   const [pbScheduleEnabled, setPbScheduleEnabled] = useState(false);
   const [pbScheduleType, setPbScheduleType] = useState<"interval" | "cron">("interval");
   const [pbScheduleValue, setPbScheduleValue] = useState("300");
@@ -365,6 +383,14 @@ function AutomationPage() {
     setPbName("");
     setPbDescription("");
     setPbYaml(defaultPlaybookYaml);
+    setPbRepoUrl("");
+    setPbRepoRef("");
+    setPbRepoPlaybookPath("");
+    setPbRepoAutoSync(false);
+    setPbRepoLastCommit(null);
+    setPbRepoLastSyncAt(null);
+    setPbRepoSyncStatus(null);
+    setPbRepoSyncMessage(null);
     setPbScheduleEnabled(false);
     setPbScheduleType("interval");
     setPbScheduleValue("300");
@@ -435,6 +461,14 @@ function AutomationPage() {
     setPbName(pb.name);
     setPbDescription(pb.description ?? "");
     setPbYaml(pb.stored_content ?? defaultPlaybookYaml);
+    setPbRepoUrl(pb.repo_url ?? "");
+    setPbRepoRef(pb.repo_ref ?? "");
+    setPbRepoPlaybookPath(pb.repo_playbook_path ?? "");
+    setPbRepoAutoSync(Boolean(pb.repo_auto_sync));
+    setPbRepoLastCommit(pb.repo_last_commit ?? null);
+    setPbRepoLastSyncAt(pb.repo_last_sync_at ?? null);
+    setPbRepoSyncStatus(pb.repo_sync_status ?? null);
+    setPbRepoSyncMessage(pb.repo_sync_message ?? null);
     setPbWebhookToken(null);
     setPbWebhookPath(null);
     const schedule = pb.schedule ?? null;
@@ -483,6 +517,29 @@ function AutomationPage() {
     }
   };
 
+  const syncPlaybookRepo = async () => {
+    if (!token || !editPlaybookId) return;
+    setPbRepoSyncLoading(true);
+    try {
+      const updated = await apiFetch<Playbook>(`/api/v1/playbooks/${editPlaybookId}/sync`, {
+        method: "POST",
+        token,
+      });
+      setPlaybooks((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
+      setPbYaml(updated.stored_content ?? defaultPlaybookYaml);
+      setPbRepoLastCommit(updated.repo_last_commit ?? null);
+      setPbRepoLastSyncAt(updated.repo_last_sync_at ?? null);
+      setPbRepoSyncStatus(updated.repo_sync_status ?? null);
+      setPbRepoSyncMessage(updated.repo_sync_message ?? null);
+      pushToast({ title: "Repo синхронизирован", description: updated.repo_last_commit ?? "", variant: "success" });
+    } catch (err) {
+      const msg = formatError(err);
+      pushToast({ title: "Ошибка синхронизации", description: msg, variant: "error" });
+    } finally {
+      setPbRepoSyncLoading(false);
+    }
+  };
+
   const submitPlaybook = async (e: FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -502,6 +559,10 @@ function AutomationPage() {
       const payload = {
         name: pbName,
         description: pbDescription || null,
+        repo_url: pbRepoUrl || null,
+        repo_ref: pbRepoRef || null,
+        repo_playbook_path: pbRepoPlaybookPath || null,
+        repo_auto_sync: pbRepoAutoSync,
         stored_content: pbYaml,
         variables: {},
         inventory_scope: [],
@@ -902,6 +963,30 @@ function AutomationPage() {
     return typeof status === "string" ? status : null;
   };
 
+  const getRepoCommit = (run: Run) => {
+    const snapshot = run.target_snapshot as Record<string, unknown>;
+    const commit = snapshot?.repo_commit;
+    if (typeof commit === "string" && commit) {
+      return commit.slice(0, 8);
+    }
+    return "—";
+  };
+
+  const getRepoCommitFull = (run: Run) => {
+    const snapshot = run.target_snapshot as Record<string, unknown>;
+    const commit = snapshot?.repo_commit;
+    return typeof commit === "string" && commit ? commit : null;
+  };
+
+  const buildCommitUrl = (repoUrl: string | null | undefined, commit: string | null) => {
+    if (!repoUrl || !commit) return null;
+    if (!repoUrl.startsWith("http")) return null;
+    const base = repoUrl.replace(/\.git$/, "");
+    if (base.includes("gitlab")) return `${base}/-/commit/${commit}`;
+    if (base.includes("bitbucket")) return `${base}/commits/${commit}`;
+    return `${base}/commit/${commit}`;
+  };
+
   const getApprovalTargets = (run?: Run | null) => {
     if (!run) return "—";
     const snapshot = run.target_snapshot as Record<string, unknown>;
@@ -1034,9 +1119,42 @@ function AutomationPage() {
         </div>
       </header>
 
+      <div className="tabs">
+        <button
+          type="button"
+          className={`tab-button ${automationTab === "playbooks" ? "active" : ""}`}
+          onClick={() => setAutomationTab("playbooks")}
+        >
+          Плейбуки
+        </button>
+        <button
+          type="button"
+          className={`tab-button ${automationTab === "templates" ? "active" : ""}`}
+          onClick={() => setAutomationTab("templates")}
+        >
+          Шаблоны/инстансы
+        </button>
+        <button
+          type="button"
+          className={`tab-button ${automationTab === "triggers" ? "active" : ""}`}
+          onClick={() => setAutomationTab("triggers")}
+        >
+          Триггеры
+        </button>
+        <button
+          type="button"
+          className={`tab-button ${automationTab === "runs" ? "active" : ""}`}
+          onClick={() => setAutomationTab("runs")}
+        >
+          Запуски/approvals
+        </button>
+      </div>
+
       {error && <p className="text-error">{error}</p>}
       {loading && <p>Загружаем...</p>}
 
+      {automationTab === "templates" && (
+      <>
       <div className="grid">
         <div className="panel">
           <div className="panel-title">
@@ -1376,7 +1494,10 @@ function AutomationPage() {
           </form>
         </div>
       </div>
+      </>
+      )}
 
+      {automationTab === "triggers" && (
       <div className="grid">
         <div className="panel">
           <div className="panel-title">
@@ -1508,7 +1629,9 @@ function AutomationPage() {
           </form>
         </div>
       </div>
+      )}
 
+      {automationTab === "playbooks" && (
       <div className="grid">
         <div className="panel">
           <div className="panel-title">
@@ -1522,6 +1645,7 @@ function AutomationPage() {
                 <tr>
                   <th>Название</th>
                   <th>Описание</th>
+                  <th>Repo</th>
                   <th>Запуски</th>
                   <th>Действия</th>
                 </tr>
@@ -1529,6 +1653,7 @@ function AutomationPage() {
               <tbody>
                 {Array.from({ length: 4 }).map((_, idx) => (
                   <tr key={`skeleton-playbook-${idx}`}>
+                    <td><span className="skeleton-line" /></td>
                     <td><span className="skeleton-line" /></td>
                     <td><span className="skeleton-line" /></td>
                     <td><span className="skeleton-line small" /></td>
@@ -1544,6 +1669,7 @@ function AutomationPage() {
                 <tr>
                   <th>Название</th>
                   <th>Описание</th>
+                  <th>Repo</th>
                   <th>Запуски</th>
                   <th>Действия</th>
                 </tr>
@@ -1553,6 +1679,19 @@ function AutomationPage() {
                   <tr key={pb.id}>
                     <td>{pb.name}</td>
                     <td>{pb.description ?? ""}</td>
+                    <td>
+                      {pb.repo_url ? (
+                        <div>
+                          <div>{pb.repo_url}</div>
+                          <div className="form-helper">path: {pb.repo_playbook_path ?? "—"}</div>
+                          {pb.repo_last_commit && (
+                            <div className="form-helper">commit: {pb.repo_last_commit.slice(0, 8)}</div>
+                          )}
+                        </div>
+                      ) : (
+                        "—"
+                      )}
+                    </td>
                     <td>{runsByPlaybook.get(pb.id) ?? 0}</td>
                     <td>
                       <div className="row-actions">
@@ -1592,6 +1731,72 @@ function AutomationPage() {
               YAML (playbook.yml)
               <textarea value={pbYaml} onChange={(e) => setPbYaml(e.target.value)} rows={14} style={{ resize: "vertical" }} />
             </label>
+            <div className="panel" style={{ padding: "0.75rem" }}>
+              <div className="panel-title">
+                <h2>Git репозиторий</h2>
+                <p className="form-helper">Опционально: загрузка playbook.yml из репо.</p>
+              </div>
+              <div className="form-stack" style={{ marginTop: 0 }}>
+                <label>
+                  Repo URL
+                  <input
+                    value={pbRepoUrl}
+                    onChange={(e) => setPbRepoUrl(e.target.value)}
+                    placeholder="https://github.com/org/repo.git"
+                    disabled={!isAdmin}
+                  />
+                </label>
+                <label>
+                  Ref (branch/tag/commit)
+                  <input
+                    value={pbRepoRef}
+                    onChange={(e) => setPbRepoRef(e.target.value)}
+                    placeholder="main"
+                    disabled={!isAdmin}
+                  />
+                </label>
+                <label>
+                  Playbook path
+                  <input
+                    value={pbRepoPlaybookPath}
+                    onChange={(e) => setPbRepoPlaybookPath(e.target.value)}
+                    placeholder="playbooks/site.yml"
+                    disabled={!isAdmin}
+                  />
+                </label>
+                <label className="checkbox-row">
+                  <input
+                    type="checkbox"
+                    checked={pbRepoAutoSync}
+                    onChange={(e) => setPbRepoAutoSync(e.target.checked)}
+                    disabled={!isAdmin}
+                  />
+                  <span>Авто-синхронизация при запуске</span>
+                </label>
+                <div className="row-actions">
+                  <button
+                    type="button"
+                    className="ghost-button"
+                    onClick={syncPlaybookRepo}
+                    disabled={!isAdmin || !editPlaybookId || pbRepoSyncLoading}
+                  >
+                    {pbRepoSyncLoading ? "Синхронизация..." : "Sync now"}
+                  </button>
+                  {pbRepoLastCommit && (
+                    <span className="form-helper">commit: {pbRepoLastCommit.slice(0, 8)}</span>
+                  )}
+                  {pbRepoLastSyncAt && (
+                    <span className="form-helper">
+                      last sync: {new Date(pbRepoLastSyncAt).toLocaleString()}
+                    </span>
+                  )}
+                  {pbRepoSyncStatus && (
+                    <span className="form-helper">status: {pbRepoSyncStatus}</span>
+                  )}
+                </div>
+                {pbRepoSyncMessage && <span className="text-error form-error">{pbRepoSyncMessage}</span>}
+              </div>
+            </div>
             <div className="panel" style={{ padding: "0.75rem" }}>
               <div className="panel-title">
                 <h2>Расписание (MVP)</h2>
@@ -1719,7 +1924,10 @@ function AutomationPage() {
           </form>
         </div>
       </div>
+      )}
 
+      {automationTab === "runs" && (
+      <>
       <div className="panel">
         <div className="panel-title">
           <h2>Approval запросы</h2>
@@ -1850,6 +2058,7 @@ function AutomationPage() {
               <tr>
                 <th>ID</th>
                 <th>Плейбук</th>
+                <th>Commit</th>
                 <th>Статус</th>
                 <th>Источник</th>
                 <th>Время</th>
@@ -1861,6 +2070,7 @@ function AutomationPage() {
                 <tr key={`skeleton-run-${idx}`}>
                   <td><span className="skeleton-line small" /></td>
                   <td><span className="skeleton-line" /></td>
+                  <td><span className="skeleton-line small" /></td>
                   <td><span className="skeleton-line small" /></td>
                   <td><span className="skeleton-line" /></td>
                   <td><span className="skeleton-line small" /></td>
@@ -1876,6 +2086,7 @@ function AutomationPage() {
               <tr>
                 <th>ID</th>
                 <th>Плейбук</th>
+                <th>Commit</th>
                 <th>Статус</th>
                 <th>Источник</th>
                 <th>Время</th>
@@ -1886,7 +2097,22 @@ function AutomationPage() {
               {runs.map((r) => (
                 <tr key={r.id}>
                   <td>{r.id}</td>
-                  <td>{r.playbook_id}</td>
+                  <td>{playbookById.get(r.playbook_id)?.name ?? `#${r.playbook_id}`}</td>
+                  <td>
+                    {(() => {
+                      const commit = getRepoCommitFull(r);
+                      const repoUrl = playbookById.get(r.playbook_id)?.repo_url;
+                      const link = buildCommitUrl(repoUrl, commit);
+                      if (commit && link) {
+                        return (
+                          <a href={link} target="_blank" rel="noreferrer">
+                            {commit.slice(0, 8)}
+                          </a>
+                        );
+                      }
+                      return getRepoCommit(r);
+                    })()}
+                  </td>
                   <td>
                     <span className={`status-pill ${r.status}`}>
                       {getApprovalStatus(r) === "pending" ? "pending (approval)" : r.status}
@@ -1907,6 +2133,8 @@ function AutomationPage() {
           </table>
         )}
       </div>
+      </>
+      )}
 
       {runModal.open && runModal.playbook && (
         <div className="modal-overlay">
@@ -1989,6 +2217,37 @@ function AutomationPage() {
             <div className="modal-header">
               <div>
                 <strong>Логи: run {logModal.run.id}</strong>
+                <div className="form-helper">
+                  {(() => {
+                    const pb = playbookById.get(logModal.run.playbook_id);
+                    const commit = getRepoCommitFull(logModal.run);
+                    const link = buildCommitUrl(pb?.repo_url, commit);
+                    return (
+                      <>
+                        {pb?.name ?? `Playbook #${logModal.run.playbook_id}`} · commit{" "}
+                        {commit && link ? (
+                          <a href={link} target="_blank" rel="noreferrer">
+                            {commit.slice(0, 8)}
+                          </a>
+                        ) : (
+                          getRepoCommit(logModal.run)
+                        )}
+                      </>
+                    );
+                  })()}
+                </div>
+                {playbookById.get(logModal.run.playbook_id)?.repo_url && (
+                  <div className="form-helper">
+                    repo:{" "}
+                    <a
+                      href={playbookById.get(logModal.run.playbook_id)?.repo_url ?? "#"}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      {playbookById.get(logModal.run.playbook_id)?.repo_url}
+                    </a>
+                  </div>
+                )}
                 <div className="form-helper">Live обновление по SSE.</div>
                 {isAdmin && artifacts.length > 0 && token && (
                   <div className="form-helper" style={{ marginTop: 6 }}>

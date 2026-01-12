@@ -51,24 +51,22 @@ function DashboardPage() {
     setLoading(true);
     setError(null);
     try {
-      const requests = [
+      const auditPromise = isAdmin
+        ? apiFetch<AuditEvent[]>("/api/v1/audit/?limit=10&action=ssh.connect", { token })
+        : Promise.resolve<AuditEvent[]>([]);
+      const [h, r, s, p, a] = await Promise.all([
         apiFetch<Host[]>("/api/v1/hosts/", { token }),
         apiFetch<Run[]>("/api/v1/runs/", { token }),
         apiFetch<Secret[]>("/api/v1/secrets/", { token }),
         apiFetch<Playbook[]>("/api/v1/playbooks/", { token }),
-      ];
-      if (isAdmin) {
-        requests.push(
-          apiFetch<AuditEvent[]>("/api/v1/audit/?limit=10&action=ssh.connect", { token })
-        );
-      }
-      const [h, r, s, p, a] = await Promise.all(requests);
+        auditPromise,
+      ]);
       setHosts(h ?? []);
       setRuns(r ?? []);
       setSecrets(s ?? []);
       setPlaybooks(p ?? []);
       if (isAdmin) {
-        setSshEvents((a as AuditEvent[]) ?? []);
+        setSshEvents(a ?? []);
       }
     } catch (err) {
       const msg = formatError(err);

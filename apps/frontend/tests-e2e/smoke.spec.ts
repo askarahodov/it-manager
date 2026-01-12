@@ -9,7 +9,8 @@ test("smoke: логин и навигация по ключевым раздел
   await page.getByRole("button", { name: "Хосты" }).click();
   await expect(page.getByRole("heading", { name: "Хосты" })).toBeVisible();
   const demoHost = await ensureDemoHostWithSecret(page);
-  await page.getByLabel("Поиск по name/hostname").fill(demoHost.name);
+  await page.getByRole("button", { name: "Инвентарь" }).click();
+  await page.getByLabel("Поиск по имени/hostname").fill(demoHost.name);
   await page.getByRole("button", { name: "Обновить" }).click();
   await expect(page.locator("tr", { hasText: demoHost.name }).first()).toBeVisible();
   await takeScreenshot(page, "02-hosts");

@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.api.v1.endpoints import audit, approvals, auth, groups, hosts, notifications, playbook_instances, playbook_templates, playbook_triggers, playbooks, projects, runs, secrets, users
+from app.api.v1.endpoints import admin_settings, audit, approvals, auth, groups, hosts, notifications, playbook_instances, playbook_templates, playbook_triggers, playbooks, plugins, projects, runs, secrets, users
 
 api_router = APIRouter()
 
@@ -18,3 +18,5 @@ api_router.include_router(approvals.router, prefix="/approvals", tags=["Approval
 api_router.include_router(secrets.router, prefix="/secrets", tags=["Secrets"])
 api_router.include_router(audit.router, prefix="/audit", tags=["Audit"])
 api_router.include_router(users.router, prefix="/users", tags=["Users"])
+api_router.include_router(admin_settings.router, prefix="/admin/settings", tags=["AdminSettings"])
+api_router.include_router(plugins.router, prefix="/plugins", tags=["Plugins"])

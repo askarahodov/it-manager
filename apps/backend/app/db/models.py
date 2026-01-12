@@ -45,6 +45,12 @@ class SecretType(str, enum.Enum):
     private_key = "private_key"
 
 
+class PluginType(str, enum.Enum):
+    inventory = "inventory"
+    secrets = "secrets"
+    automation = "automation"
+
+
 class UserRole(str, enum.Enum):
     admin = "admin"
     operator = "operator"
@@ -87,7 +93,24 @@ class Secret(Base):
     rotation_interval_days = Column(Integer, nullable=True)
     last_rotated_at = Column(DateTime, nullable=True)
     next_rotated_at = Column(DateTime, nullable=True)
+    dynamic_enabled = Column(Boolean, default=False, nullable=False)
+    dynamic_ttl_seconds = Column(Integer, nullable=True)
     created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, onupdate=datetime.utcnow())
+
+
+class PluginInstance(Base):
+    __tablename__ = "plugin_instances"
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False, default=1, index=True)
+    type = Column(Enum(PluginType), nullable=False)
+    definition_id = Column(String, nullable=False)
+    name = Column(String, nullable=False)
+    enabled = Column(Boolean, default=True, nullable=False)
+    is_default = Column(Boolean, default=False, nullable=False)
+    config = Column(JSONB, default=dict)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, onupdate=datetime.utcnow())
 
@@ -121,6 +144,19 @@ class Host(Base):
     updated_at = Column(DateTime, onupdate=datetime.utcnow())
 
     credential = relationship("Secret", lazy="joined")
+
+
+class SecretLease(Base):
+    __tablename__ = "secret_leases"
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False, default=1, index=True)
+    secret_id = Column(Integer, ForeignKey("secrets.id"), nullable=False, index=True)
+    issued_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    issued_at = Column(DateTime, server_default=func.now(), nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+    revoked_at = Column(DateTime, nullable=True)
+    encrypted_value = Column(Text, nullable=False)
 
 
 class HostHealthCheck(Base):
@@ -350,4 +386,12 @@ class NotificationEndpoint(Base):
     events = Column(JSONB, default=list)
     enabled = Column(Boolean, default=True)
     created_at = Column(DateTime, server_default=func.now())
+
+
+class GlobalSetting(Base):
+    __tablename__ = "global_settings"
+
+    key = Column(String, primary_key=True)
+    value = Column(JSONB, nullable=False, default=dict)
+    updated_at = Column(DateTime, onupdate=datetime.utcnow)
     updated_at = Column(DateTime, onupdate=datetime.utcnow())

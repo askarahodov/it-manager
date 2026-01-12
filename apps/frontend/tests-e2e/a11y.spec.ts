@@ -18,7 +18,8 @@ test("a11y: Settings/Hosts/Secrets", async ({ page }) => {
   await expectNoCriticalA11yViolations(page);
 
   const demoHost = await ensureDemoHostWithSecret(page);
-  await page.getByLabel("Поиск по name/hostname").fill(demoHost.name);
+  await page.getByRole("button", { name: "Инвентарь" }).click();
+  await page.getByLabel("Поиск по имени/hostname").fill(demoHost.name);
   await page.getByRole("button", { name: "Обновить" }).click();
   await expect(page.locator("tr", { hasText: demoHost.name }).first()).toBeVisible();
   await page.locator("tr", { hasText: demoHost.name }).first().getByRole("button", { name: "Детали" }).click();

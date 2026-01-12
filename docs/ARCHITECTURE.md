@@ -8,8 +8,11 @@
 - **Jobs/Scheduler**: отдельный воркер на Python (asyncio loops) + Redis очередь, запуск `ansible-playbook`/ansible-runner; расписания (interval/cron), ротации секретов и фоновые проверки выполняются воркером.
 - **Secrets**: значения шифруются AES-GCM и хранятся в базе; master key из env (ENV_MASTER_KEY), рассекречивание только для авторизованных действий; поддерживаются типы password/token/text и private_key с passphrase.
 - **Secrets rotation**: manual + scheduled rotation (password/token) через воркер, поддержка expires_at/intervals + apply для SSH password на хостах.
+- **Dynamic secrets**: leases с TTL и авто‑revoke (MVP).
 - **Notifications**: outbound webhook/slack/telegram/email endpoints с подпиской на события (run/approval/host/secret).
 - **Git integration**: playbooks из repo (URL/ref/path) с ручным sync и auto-sync перед запуском.
+- **Admin settings**: глобальные настройки (maintenance/banner/default project) доступны только admin.
+- **Plugins**: подключаемые backends (inventory/secrets/automation) с управлением instances на уровне проекта.
 - **Auth**: JWT + RBAC роли (admin/operator/viewer/automation-only).
 - **Документация/Observability**: OpenAPI + healthcheck + structured logging.
 
@@ -43,11 +46,14 @@ NotificationEndpoint (webhook) -> события по проекту
 - **PlaybookTarget**: связывает playbook с host/group + snapshot
 - **JobRun**: id, playbook_id, triggered_by, status, logs, started_at, finished_at, target_snapshot (approval/facts/actions)
 - **Secret**: id, name, type, encrypted_value, scope, tags, expires_at, rotation_interval, last/next rotate
+- **SecretLease**: временные значения (secret_id, expires_at, revoked_at)
 - **CredentialReference**: связь Host->Secret (credential)
 - **AutomationSchedule**: playbook_id, cron, enabled (в variables.__schedule)
 - **ApprovalRequest**: approvals для prod запусков
 - **SshSession**: метаданные + transcript (опционально)
 - **NotificationEndpoint**: webhooks для уведомлений
+- **GlobalSetting**: key/value настройки уровня инстанса
+- **PluginInstance**: конфигурация плагинов (type/definition/config/default)
 
 ## API (черновой)
 - `POST /auth/login` — получить JWT
@@ -64,11 +70,16 @@ NotificationEndpoint (webhook) -> события по проекту
 - `GET /playbooks`, `POST /playbooks`, `GET /playbooks/{id}`, `PUT /playbooks/{id}`, `DELETE /playbooks/{id}`
 - `POST /playbooks/{id}/run` — ручной запуск
 - `POST /playbooks/{id}/sync` — git sync
+- `GET/PUT /admin/settings` — глобальные настройки (admin-only)
+- `GET /admin/settings/public` — публичный баннер/maintenance
+- `GET /plugins/definitions` — список доступных plugin definitions (admin-only)
+- `GET/POST/PUT/DELETE /plugins` — управление plugin instances (admin-only)
 - `GET /runs`, `GET /runs/{id}`
 - `POST /runs/{id}/logs` (streaming/ws)
 - `GET /secrets`, `POST /secrets`, `PUT /secrets/{id}`, `DELETE /secrets/{id}`, `POST /secrets/{id}/reveal`
 - `POST /secrets/{id}/rotate`
 - `POST /secrets/{id}/rotate-apply`
+- `POST /secrets/{id}/lease`
 - `GET /notifications`, `POST /notifications`, `PUT /notifications/{id}`, `DELETE /notifications/{id}`
 - `GET /health`, `GET /metrics`
 

@@ -83,7 +83,7 @@
 - [x] rotation policies (scheduled) + фоновые задачи
 - [x] интеграции rotation (SSH password / API token)
 - [x] уведомления: expiring soon / rotated
-- [ ] dynamic secrets (опционально): TTL creds + auto revoke
+- [x] dynamic secrets (опционально): TTL creds + auto revoke
 
 ### SSH & Remote Ops
 - [x] SSH session recording (metadata): duration/user/host/success/error
@@ -95,11 +95,12 @@
 - [x] dashboard widgets (status/runs/schedules/ssh activity)
 - [x] dashboard widgets: expiring secrets
 - [x] audit log UI: фильтры + экспорт + before/after + source/IP
+- [x] admin settings UI: глобальные настройки инстанса
 
 ### Интеграции и Ops
 - [x] git integration: auto-sync + commit hash в execution history
 - [x] notifications: outbound webhook
 - [x] notifications: Slack/Telegram/Email
 - [x] webhooks (inbound/outbound)
-- [ ] plugin system (inventory/secrets/automation backends)
+- [x] plugin system (inventory/secrets/automation backends)
 - [ ] scale/HA: multiple workers + distributed locks + sharding

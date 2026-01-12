@@ -79,9 +79,11 @@ E2E тесты живут в `apps/frontend/tests-e2e` и поднимают в�
 - Группы хостов: static/dynamic, rule engine, пересчёт состава (воркером и вручную).
 - Vault-секреты (AES-GCM) с `/api/v1/secrets` и `/api/v1/secrets/{id}/reveal`, включая тип `private_key` с passphrase, scope `global`, `expires_at`, rotation interval и ручную ротацию (`/api/v1/secrets/{id}/rotate`).
 - Ротация SSH password с применением на хостах через системный playbook (`/api/v1/secrets/{id}/rotate-apply`).
+- Dynamic secrets (leases): выдача временного значения с TTL через `/api/v1/secrets/{id}/lease`.
 - Плановая ротация секретов (password/token) выполняется воркером по интервалу (`WORKER_ROTATION_POLL_SECONDS`).
 - Automation: CRUD плейбуков, playbook templates/instances, запуск вручную/по расписанию, история и live-логи (SSE).
 - Git integration: playbooks из repo + ручной sync и auto-sync на запуске, commit hash сохраняется в run history.
+- Admin settings: глобальные настройки инстанса (maintenance/banner/default project) через `/api/v1/admin/settings`.
 - Approval flow для prod запусков: requester/approver, diff параметров, UI approvals.
 - Event-driven triggers: webhook, host created/tags changed, secret rotated.
 - Надёжность Automation: таймауты выполнения, ограниченные ретраи на временные сбои, watchdog зависших запусков (running слишком долго).
@@ -149,9 +151,6 @@ Integration-тесты: `docker compose -f deploy/docker-compose.yml exec -T -w 
 
 ## Что дальше
 
-- git integration для playbooks + auto-sync.
-- dynamic secrets (TTL creds + auto revoke).
-- plugin system (inventory/secrets/automation backends).
 - HA/scale: multiple workers + distributed locks + sharding.
 
 > Вся платформа готова к запуску `docker compose -f deploy/docker-compose.yml up -d`.

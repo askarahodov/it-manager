@@ -82,7 +82,7 @@
 - [x] secret rotation (scheduled) + фоновые задачи
 - [x] уведомления: expiring soon / rotated
 - [x] интеграция rotation с SSH passwords/API tokens (MVP)
-- [ ] dynamic secrets (опционально): TTL creds + auto revoke
+- [x] dynamic secrets (опционально): TTL creds + auto revoke
 
 ## Фаза 13: SSH & Remote Operations
 - [x] SSH session recording (metadata): duration/user/host/success-error
@@ -100,5 +100,6 @@
 - [x] notifications: outbound webhook (run/approval/host/secret)
 - [x] notifications: Slack/Telegram/Email (failed run/approval needed/secret expiring/host offline)
 - [x] webhooks: inbound triggers + outbound notifications
-- [ ] plugin system (inventory/secrets/automation backends)
+- [x] admin settings: глобальные настройки инстанса (maintenance/banner/default project)
+- [x] plugin system (inventory/secrets/automation backends)
 - [ ] HA/scale: multiple workers, distributed locks, sharding

@@ -24,6 +24,8 @@ class SecretBase(BaseModel):
     tags: Dict[str, str] = Field(default_factory=dict)
     expires_at: Optional[datetime] = None
     rotation_interval_days: Optional[int] = Field(default=None, ge=1)
+    dynamic_enabled: bool = False
+    dynamic_ttl_seconds: Optional[int] = Field(default=None, ge=60)
 
 
 class SecretCreate(SecretBase):
@@ -69,3 +71,22 @@ class SecretRotateRequest(BaseModel):
 class SecretRotateApplyRequest(BaseModel):
     value: str = Field(..., min_length=1)
     passphrase: Optional[str] = None
+
+
+class SecretLeaseRequest(BaseModel):
+    ttl_seconds: Optional[int] = Field(default=None, ge=60)
+
+
+class SecretLeaseRead(BaseModel):
+    id: int
+    secret_id: int
+    expires_at: datetime
+    revoked_at: Optional[datetime] = None
+    issued_at: datetime
+    issued_by: Optional[int] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class SecretLeaseIssueResponse(SecretLeaseRead):
+    value: str

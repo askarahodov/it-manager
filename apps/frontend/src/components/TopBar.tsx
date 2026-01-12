@@ -12,6 +12,12 @@ type Props = {
   onOpenSearch: () => void;
 };
 
+type PublicSettings = {
+  maintenance_mode: boolean;
+  banner_message?: string | null;
+  banner_level: "info" | "warning" | "error";
+};
+
 function pickDefaultProjectId(projects: Project[]): number | null {
   const def = projects.find((p) => p.name === "default");
   return def?.id ?? (projects[0]?.id ?? null);
@@ -24,6 +30,7 @@ function TopBar({ sidebarOpen, onToggleSidebar, onOpenSearch }: Props) {
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectsError, setProjectsError] = useState<string | null>(null);
   const [selectedProjectId, setSelectedProjectId] = useState<number | null>(() => getProjectId());
+  const [publicSettings, setPublicSettings] = useState<PublicSettings | null>(null);
 
   useEffect(() => {
     if (!token || status !== "authenticated") {
@@ -52,66 +59,85 @@ function TopBar({ sidebarOpen, onToggleSidebar, onOpenSearch }: Props) {
       });
   }, [status, token]);
 
+  useEffect(() => {
+    apiFetch<PublicSettings>("/api/v1/admin/settings/public")
+      .then((settings) => {
+        setPublicSettings(settings);
+      })
+      .catch(() => undefined);
+  }, []);
+
   const selectedProject = useMemo(
     () => (selectedProjectId ? projects.find((p) => p.id === selectedProjectId) ?? null : null),
     [projects, selectedProjectId]
   );
 
   const canSwitch = status === "authenticated" && Boolean(token) && projects.length > 0;
+  const bannerText = publicSettings?.banner_message?.trim() || (publicSettings?.maintenance_mode ? "Режим обслуживания. Возможны ограничения." : "");
+  const bannerLevel = publicSettings?.banner_level ?? "info";
+  const bannerVisible = Boolean(bannerText);
 
   return (
-    <header className="top-bar">
-      <div className="top-left">
-        <button
-          type="button"
-          className={`ghost-button menu-toggle ${sidebarOpen ? "active" : ""}`}
-          onClick={onToggleSidebar}
-          aria-label="Открыть меню"
-        >
-          <svg className="menu-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-            <rect x="3" y="6" width="18" height="2" rx="1" />
-            <rect x="3" y="11" width="18" height="2" rx="1" />
-            <rect x="3" y="16" width="18" height="2" rx="1" />
-          </svg>
-          Меню
-        </button>
-        <div>IT Manager</div>
-        <div className="top-project">
-          <span className="top-project-label">Проект:</span>
-          <select
-            className="select"
-            value={selectedProjectId ?? ""}
-            onChange={(e) => {
-              const value = e.target.value;
-              const next = value ? Number(value) : null;
-              setSelectedProjectId(next);
-              setProjectId(next);
-              pushToast({
-                title: "Проект выбран",
-                description: next ? `Текущий проект: ${projects.find((p) => p.id === next)?.name ?? next}` : "default",
-                variant: "success",
-              });
-            }}
-            disabled={!canSwitch}
-            aria-label="Выбор проекта"
-            title={projectsError ? `Ошибка загрузки проектов: ${projectsError}` : selectedProject?.name ?? ""}
-          >
-            {!canSwitch && <option value="">default</option>}
-            {canSwitch && projects.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
-          {projectsError && <span className="top-project-hint text-error">Проекты недоступны: {projectsError}</span>}
+    <>
+      {bannerVisible && (
+        <div className={`global-banner ${bannerLevel}`}>
+          <div className="banner-text">{bannerText}</div>
+          {publicSettings?.maintenance_mode && <span className="banner-tag">maintenance</span>}
         </div>
-        <button type="button" className="ghost-button search-button" onClick={onOpenSearch}>
-          Поиск <span className="search-hint">Ctrl+K</span>
-        </button>
-      </div>
-      <div className="status-pill">Alpha</div>
-      <div className="top-user">{status === "authenticated" && user ? `${user.email} (${user.role})` : "не авторизован"}</div>
-    </header>
+      )}
+      <header className="top-bar">
+        <div className="top-left">
+          <button
+            type="button"
+            className={`ghost-button menu-toggle ${sidebarOpen ? "active" : ""}`}
+            onClick={onToggleSidebar}
+            aria-label="Открыть меню"
+          >
+            <svg className="menu-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <rect x="3" y="6" width="18" height="2" rx="1" />
+              <rect x="3" y="11" width="18" height="2" rx="1" />
+              <rect x="3" y="16" width="18" height="2" rx="1" />
+            </svg>
+            Меню
+          </button>
+          <div>IT Manager</div>
+          <div className="top-project">
+            <span className="top-project-label">Проект:</span>
+            <select
+              className="select"
+              value={selectedProjectId ?? ""}
+              onChange={(e) => {
+                const value = e.target.value;
+                const next = value ? Number(value) : null;
+                setSelectedProjectId(next);
+                setProjectId(next);
+                pushToast({
+                  title: "Проект выбран",
+                  description: next ? `Текущий проект: ${projects.find((p) => p.id === next)?.name ?? next}` : "default",
+                  variant: "success",
+                });
+              }}
+              disabled={!canSwitch}
+              aria-label="Выбор проекта"
+              title={projectsError ? `Ошибка загрузки проектов: ${projectsError}` : selectedProject?.name ?? ""}
+            >
+              {!canSwitch && <option value="">default</option>}
+              {canSwitch && projects.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+            {projectsError && <span className="top-project-hint text-error">Проекты недоступны: {projectsError}</span>}
+          </div>
+          <button type="button" className="ghost-button search-button" onClick={onOpenSearch}>
+            Поиск <span className="search-hint">Ctrl+K</span>
+          </button>
+        </div>
+        <div className="status-pill">Alpha</div>
+        <div className="top-user">{status === "authenticated" && user ? `${user.email} (${user.role})` : "не авторизован"}</div>
+      </header>
+    </>
   );
 }
 

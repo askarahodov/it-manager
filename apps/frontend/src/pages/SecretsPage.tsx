@@ -19,6 +19,8 @@ type Secret = {
   tags: Record<string, string>;
   expires_at?: string | null;
   rotation_interval_days?: number | null;
+  dynamic_enabled?: boolean;
+  dynamic_ttl_seconds?: number | null;
   last_rotated_at?: string | null;
   next_rotated_at?: string | null;
   created_at: string;
@@ -32,6 +34,8 @@ type SecretFormState = {
   tags: string;
   expires_at: string;
   rotation_interval_days: string;
+  dynamic_enabled: boolean;
+  dynamic_ttl_seconds: string;
   value: string;
   passphrase: string;
 };
@@ -44,6 +48,8 @@ const defaultForm: SecretFormState = {
   tags: "",
   expires_at: "",
   rotation_interval_days: "",
+  dynamic_enabled: false,
+  dynamic_ttl_seconds: "",
   value: "",
   passphrase: "",
 };
@@ -93,6 +99,9 @@ function SecretsPage() {
   const [rotatePassphrase, setRotatePassphrase] = useState("");
   const [rotateApply, setRotateApply] = useState(false);
   const [secretsTab, setSecretsTab] = useState<"list" | "manage">("list");
+  const [leaseValue, setLeaseValue] = useState<string | null>(null);
+  const [leaseExpiresAt, setLeaseExpiresAt] = useState<string | null>(null);
+  const [leaseSecretName, setLeaseSecretName] = useState<string | null>(null);
 
   const isAdmin = user?.role === "admin";
   const canReveal = isAdmin;
@@ -162,6 +171,12 @@ function SecretsPage() {
         payload.rotation_interval_days = Number(form.rotation_interval_days);
       } else {
         payload.rotation_interval_days = null;
+      }
+      payload.dynamic_enabled = Boolean(form.dynamic_enabled);
+      if (form.dynamic_enabled && form.dynamic_ttl_seconds) {
+        payload.dynamic_ttl_seconds = Number(form.dynamic_ttl_seconds);
+      } else {
+        payload.dynamic_ttl_seconds = null;
       }
       if (form.value) {
         payload.value = form.value;
@@ -251,6 +266,8 @@ function SecretsPage() {
         .join(", "),
       expires_at: toInputDate(secret.expires_at),
       rotation_interval_days: secret.rotation_interval_days ? String(secret.rotation_interval_days) : "",
+      dynamic_enabled: Boolean(secret.dynamic_enabled),
+      dynamic_ttl_seconds: secret.dynamic_ttl_seconds ? String(secret.dynamic_ttl_seconds) : "",
       value: "",
       passphrase: "",
     });
@@ -263,6 +280,9 @@ function SecretsPage() {
     setForm({ ...defaultForm });
     setError(null);
     setRevealValue(null);
+    setLeaseValue(null);
+    setLeaseExpiresAt(null);
+    setLeaseSecretName(null);
     setSecretsTab("list");
   };
 
@@ -321,6 +341,29 @@ function SecretsPage() {
       const msg = formatError(err);
       setError(msg);
       pushToast({ title: "Ошибка ротации", description: msg, variant: "error" });
+    }
+  };
+
+  const issueLease = async (secret: Secret) => {
+    if (!token) return;
+    if (!secret.dynamic_enabled) {
+      pushToast({ title: "Dynamic secrets отключены", description: secret.name, variant: "warning" });
+      return;
+    }
+    try {
+      const lease = await apiFetch<{ value: string; expires_at: string }>(`/api/v1/secrets/${secret.id}/lease`, {
+        method: "POST",
+        token,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      setLeaseValue(lease.value);
+      setLeaseExpiresAt(lease.expires_at);
+      setLeaseSecretName(secret.name);
+      pushToast({ title: "Lease создан", description: secret.name, variant: "success" });
+    } catch (err) {
+      const msg = formatError(err);
+      pushToast({ title: "Ошибка lease", description: msg, variant: "error" });
     }
   };
 
@@ -470,6 +513,15 @@ function SecretsPage() {
                           >
                             Ротация
                           </button>
+                          <button
+                            type="button"
+                            className="ghost-button"
+                            disabled={!isAdmin || !secret.dynamic_enabled}
+                            onClick={() => issueLease(secret)}
+                            title={secret.dynamic_enabled ? "Выдать lease" : "Dynamic secrets отключены"}
+                          >
+                            Lease
+                          </button>
                         </div>
                       </td>
                     </tr>
@@ -483,6 +535,15 @@ function SecretsPage() {
               <h3>Значение</h3>
               <pre className="reveal-value">{revealValue}</pre>
               <p className="form-helper">Не вставляйте секреты в чаты. Закройте панель после использования.</p>
+            </div>
+          )}
+          {leaseValue && (
+            <div className="panel small reveal-panel">
+              <h3>Lease: {leaseSecretName ?? "секрет"}</h3>
+              <pre className="reveal-value">{leaseValue}</pre>
+              <p className="form-helper">
+                Истекает: {leaseExpiresAt ? new Date(leaseExpiresAt).toLocaleString() : "—"}
+              </p>
             </div>
           )}
         </div>
@@ -549,6 +610,28 @@ function SecretsPage() {
               />
               <span className="form-helper">Если задан — планируется next rotation.</span>
             </label>
+            <label className="checkbox-row">
+              <input
+                type="checkbox"
+                checked={form.dynamic_enabled}
+                onChange={(e) => setForm((prev) => ({ ...prev, dynamic_enabled: e.target.checked }))}
+                disabled={!isAdmin}
+              />
+              <span>Dynamic secret (leases)</span>
+            </label>
+            {form.dynamic_enabled && (
+              <label>
+                TTL для lease (секунды)
+                <input
+                  type="number"
+                  min={60}
+                  value={form.dynamic_ttl_seconds}
+                  onChange={(e) => setForm((prev) => ({ ...prev, dynamic_ttl_seconds: e.target.value }))}
+                  disabled={!isAdmin}
+                />
+                <span className="form-helper">Если пусто — TTL не задан, lease не выдаётся.</span>
+              </label>
+            )}
           <label>
             Значение
             {form.type === "private_key" ? (

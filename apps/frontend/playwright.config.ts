@@ -1,6 +1,9 @@
 import path from "path";
+import { fileURLToPath } from "url";
 
 import { defineConfig, devices } from "@playwright/test";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 function ensureNoProxyForLocalhost() {
   const defaults = ["127.0.0.1", "localhost"];

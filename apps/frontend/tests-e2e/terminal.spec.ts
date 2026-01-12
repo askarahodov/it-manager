@@ -9,7 +9,8 @@ test("terminal: вкладка Terminal в карточке хоста прин�
   await expect(page.getByRole("heading", { name: "Хосты" })).toBeVisible();
 
   const demoHost = await ensureDemoHostWithSecret(page);
-  await page.getByLabel("Поиск по name/hostname").fill(demoHost.name);
+  await page.getByRole("button", { name: "Инвентарь" }).click();
+  await page.getByLabel("Поиск по имени/hostname").fill(demoHost.name);
   await page.getByRole("button", { name: "Обновить" }).click();
   await expect(page.locator("tr", { hasText: demoHost.name }).first()).toBeVisible();
 

@@ -55,6 +55,34 @@ type NotificationEndpoint = {
   created_at: string;
 };
 
+type GlobalSettings = {
+  maintenance_mode: boolean;
+  banner_message?: string | null;
+  banner_level: "info" | "warning" | "error";
+  default_project_id?: number | null;
+};
+
+type PluginDefinition = {
+  id: string;
+  type: "inventory" | "secrets" | "automation";
+  name: string;
+  description?: string | null;
+  config_schema: Array<Record<string, unknown>>;
+};
+
+type PluginInstance = {
+  id: number;
+  project_id: number;
+  name: string;
+  type: "inventory" | "secrets" | "automation";
+  definition_id: string;
+  enabled: boolean;
+  is_default: boolean;
+  config: Record<string, unknown>;
+  created_at: string;
+  updated_at?: string | null;
+};
+
 const ENV_OPTIONS = ["prod", "stage", "dev"] as const;
 const NOTIFICATION_EVENTS = [
   "run.failed",
@@ -123,11 +151,39 @@ function SettingsPage() {
   const [notifSecret, setNotifSecret] = useState("");
   const [notifEnabled, setNotifEnabled] = useState(true);
   const [notifEvents, setNotifEvents] = useState<string[]>([]);
-  const [settingsTab, setSettingsTab] = useState<"session" | "projects" | "users" | "audit" | "notifications">("session");
+  const [settingsTab, setSettingsTab] = useState<
+    "session" | "projects" | "users" | "audit" | "notifications" | "plugins" | "admin"
+  >("session");
+  const [adminSettings, setAdminSettings] = useState<GlobalSettings | null>(null);
+  const [adminSettingsError, setAdminSettingsError] = useState<string | null>(null);
+  const [adminSettingsLoading, setAdminSettingsLoading] = useState(false);
+  const [maintenanceMode, setMaintenanceMode] = useState(false);
+  const [bannerMessage, setBannerMessage] = useState("");
+  const [bannerLevel, setBannerLevel] = useState<"info" | "warning" | "error">("info");
+  const [defaultProjectId, setDefaultProjectId] = useState<string>("");
+  const [pluginDefinitions, setPluginDefinitions] = useState<PluginDefinition[]>([]);
+  const [pluginInstances, setPluginInstances] = useState<PluginInstance[]>([]);
+  const [pluginError, setPluginError] = useState<string | null>(null);
+  const [pluginLoading, setPluginLoading] = useState(false);
+  const [pluginEditId, setPluginEditId] = useState<number | null>(null);
+  const [pluginName, setPluginName] = useState("");
+  const [pluginType, setPluginType] = useState<"inventory" | "secrets" | "automation">("inventory");
+  const [pluginDefinitionId, setPluginDefinitionId] = useState("");
+  const [pluginEnabled, setPluginEnabled] = useState(true);
+  const [pluginDefault, setPluginDefault] = useState(false);
+  const [pluginConfig, setPluginConfig] = useState("{\n  \n}");
 
   const selectedAccessUser = useMemo(
     () => (accessUserId ? users.find((u) => u.id === accessUserId) ?? null : null),
     [accessUserId, users]
+  );
+  const availablePluginDefinitions = useMemo(
+    () => pluginDefinitions.filter((item) => item.type === pluginType),
+    [pluginDefinitions, pluginType]
+  );
+  const selectedPluginDefinition = useMemo(
+    () => pluginDefinitions.find((item) => item.id === pluginDefinitionId) ?? null,
+    [pluginDefinitions, pluginDefinitionId]
   );
 
   useEffect(() => {
@@ -203,6 +259,45 @@ function SettingsPage() {
     }
   };
 
+  const loadAdminSettings = async () => {
+    if (!token || user?.role !== "admin") return;
+    setAdminSettingsLoading(true);
+    setAdminSettingsError(null);
+    try {
+      const data = await apiFetch<GlobalSettings>("/api/v1/admin/settings/", { token });
+      setAdminSettings(data);
+      setMaintenanceMode(Boolean(data.maintenance_mode));
+      setBannerMessage(data.banner_message ?? "");
+      setBannerLevel(data.banner_level ?? "info");
+      setDefaultProjectId(data.default_project_id ? String(data.default_project_id) : "");
+    } catch (err) {
+      const msg = formatError(err);
+      setAdminSettingsError(msg);
+    } finally {
+      setAdminSettingsLoading(false);
+    }
+  };
+
+  const loadPlugins = async () => {
+    if (!token || user?.role !== "admin") return;
+    setPluginLoading(true);
+    setPluginError(null);
+    try {
+      const [definitions, instances] = await Promise.all([
+        apiFetch<PluginDefinition[]>("/api/v1/plugins/definitions", { token }),
+        apiFetch<PluginInstance[]>("/api/v1/plugins/", { token }),
+      ]);
+      setPluginDefinitions(definitions);
+      setPluginInstances(instances);
+    } catch (err) {
+      const msg = formatError(err);
+      setPluginError(msg);
+      pushToast({ title: "Не удалось загрузить плагины", description: msg, variant: "error" });
+    } finally {
+      setPluginLoading(false);
+    }
+  };
+
   const loadAudit = async () => {
     if (!token || user?.role !== "admin") return;
     setAuditLoading(true);
@@ -231,8 +326,120 @@ function SettingsPage() {
     loadGroups().catch(() => undefined);
     loadProjects().catch(() => undefined);
     loadNotifications().catch(() => undefined);
+    loadAdminSettings().catch(() => undefined);
+    loadPlugins().catch(() => undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token, user?.role]);
+
+  useEffect(() => {
+    if (pluginEditId) return;
+    if (!availablePluginDefinitions.length) return;
+    const exists = availablePluginDefinitions.some((item) => item.id === pluginDefinitionId);
+    if (!exists) {
+      setPluginDefinitionId(availablePluginDefinitions[0].id);
+    }
+  }, [availablePluginDefinitions, pluginDefinitionId, pluginEditId]);
+
+  const resetPluginForm = () => {
+    setPluginEditId(null);
+    setPluginName("");
+    setPluginType("inventory");
+    const defaults = pluginDefinitions.filter((item) => item.type === "inventory");
+    setPluginDefinitionId(defaults[0]?.id ?? "");
+    setPluginEnabled(true);
+    setPluginDefault(false);
+    setPluginConfig("{\n  \n}");
+  };
+
+  const parsePluginConfig = () => {
+    if (!pluginConfig.trim()) return {};
+    return JSON.parse(pluginConfig);
+  };
+
+  const handlePluginSubmit = async () => {
+    if (!token || user?.role !== "admin") return;
+    let parsedConfig: Record<string, unknown>;
+    try {
+      parsedConfig = parsePluginConfig();
+    } catch (err) {
+      pushToast({ title: "Неверный JSON конфигурации", description: formatError(err), variant: "error" });
+      return;
+    }
+    if (!pluginName.trim()) {
+      pushToast({ title: "Укажите название плагина", variant: "warning" });
+      return;
+    }
+    if (!pluginDefinitionId) {
+      pushToast({ title: "Выберите definition", variant: "warning" });
+      return;
+    }
+    try {
+      if (pluginEditId) {
+        await apiFetch<PluginInstance>(`/api/v1/plugins/${pluginEditId}`, {
+          method: "PUT",
+          token,
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: pluginName,
+            enabled: pluginEnabled,
+            is_default: pluginDefault,
+            config: parsedConfig,
+          }),
+        });
+        pushToast({ title: "Плагин обновлен", variant: "success" });
+      } else {
+        await apiFetch<PluginInstance>("/api/v1/plugins/", {
+          method: "POST",
+          token,
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: pluginName,
+            type: pluginType,
+            definition_id: pluginDefinitionId,
+            enabled: pluginEnabled,
+            is_default: pluginDefault,
+            config: parsedConfig,
+          }),
+        });
+        pushToast({ title: "Плагин создан", variant: "success" });
+      }
+      resetPluginForm();
+      await loadPlugins();
+    } catch (err) {
+      const msg = formatError(err);
+      setPluginError(msg);
+      pushToast({ title: "Ошибка сохранения плагина", description: msg, variant: "error" });
+    }
+  };
+
+  const startPluginEdit = (instance: PluginInstance) => {
+    setPluginEditId(instance.id);
+    setPluginName(instance.name);
+    setPluginType(instance.type);
+    setPluginDefinitionId(instance.definition_id);
+    setPluginEnabled(instance.enabled);
+    setPluginDefault(instance.is_default);
+    setPluginConfig(JSON.stringify(instance.config ?? {}, null, 2));
+  };
+
+  const deletePluginInstance = async (instance: PluginInstance) => {
+    if (!token || user?.role !== "admin") return;
+    const ok = await confirm({
+      title: "Удалить плагин?",
+      description: `Удалить ${instance.name}? Это не удалит данные, только конфигурацию плагина.`,
+      confirmText: "Удалить",
+      tone: "danger",
+    });
+    if (!ok) return;
+    try {
+      await apiFetch(`/api/v1/plugins/${instance.id}`, { method: "DELETE", token });
+      pushToast({ title: "Плагин удален", variant: "success" });
+      await loadPlugins();
+    } catch (err) {
+      const msg = formatError(err);
+      pushToast({ title: "Не удалось удалить плагин", description: msg, variant: "error" });
+    }
+  };
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -414,6 +621,31 @@ function SettingsPage() {
     link.click();
     link.remove();
     URL.revokeObjectURL(url);
+  };
+
+  const saveAdminSettings = async () => {
+    if (!token || user?.role !== "admin") return;
+    setAdminSettingsError(null);
+    try {
+      const payload: Partial<GlobalSettings> = {
+        maintenance_mode: maintenanceMode,
+        banner_message: bannerMessage.trim() ? bannerMessage.trim() : null,
+        banner_level: bannerLevel,
+        default_project_id: defaultProjectId.trim() ? Number(defaultProjectId) : null,
+      };
+      const updated = await apiFetch<GlobalSettings>("/api/v1/admin/settings/", {
+        method: "PUT",
+        token,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      setAdminSettings(updated);
+      pushToast({ title: "Глобальные настройки сохранены", variant: "success" });
+    } catch (err) {
+      const msg = formatError(err);
+      setAdminSettingsError(msg);
+      pushToast({ title: "Ошибка сохранения", description: msg, variant: "error" });
+    }
   };
 
   const resetUserPassword = async (u: UserItem) => {
@@ -649,6 +881,20 @@ function SettingsPage() {
               onClick={() => setSettingsTab("notifications")}
             >
               Notifications
+            </button>
+            <button
+              type="button"
+              className={`tab-button ${settingsTab === "plugins" ? "active" : ""}`}
+              onClick={() => setSettingsTab("plugins")}
+            >
+              Плагины
+            </button>
+            <button
+              type="button"
+              className={`tab-button ${settingsTab === "admin" ? "active" : ""}`}
+              onClick={() => setSettingsTab("admin")}
+            >
+              Администрирование
             </button>
           </>
         )}
@@ -1317,6 +1563,187 @@ function SettingsPage() {
                   </button>
                 </div>
               </div>
+            </div>
+          </div>
+        )}
+
+        {settingsTab === "plugins" && status === "authenticated" && user?.role === "admin" && (
+          <div className="panel">
+            <div className="panel-title">
+              <h2>Plugins</h2>
+              <p className="form-helper">Подключаемые backends для inventory/secrets/automation (MVP).</p>
+            </div>
+            <div className="row-actions">
+              <button type="button" className="ghost-button" onClick={() => loadPlugins()}>
+                Обновить
+              </button>
+            </div>
+            {pluginLoading && <p>Загружаем...</p>}
+            {pluginError && <p className="text-error">{pluginError}</p>}
+            {!pluginLoading && pluginInstances.length === 0 && <p>Плагины пока не настроены</p>}
+            {pluginInstances.length > 0 && (
+              <div className="table-scroll" tabIndex={0} aria-label="Plugin instances">
+                <table className="hosts-table">
+                  <thead>
+                    <tr>
+                      <th>Название</th>
+                      <th>Тип</th>
+                      <th>Definition</th>
+                      <th>Статус</th>
+                      <th>Updated</th>
+                      <th>Действия</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {pluginInstances.map((item) => (
+                      <tr key={item.id}>
+                        <td>{item.name}</td>
+                        <td>{item.type}</td>
+                        <td>{item.definition_id}</td>
+                        <td>
+                          {item.enabled ? "enabled" : "disabled"}
+                          {item.is_default ? " (default)" : ""}
+                        </td>
+                        <td>{item.updated_at ? new Date(item.updated_at).toLocaleString() : "—"}</td>
+                        <td>
+                          <div className="row-actions">
+                            <button type="button" className="ghost-button" onClick={() => startPluginEdit(item)}>
+                              Редактировать
+                            </button>
+                            <button type="button" className="ghost-button" onClick={() => deletePluginInstance(item)}>
+                              Удалить
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            <div className="panel" style={{ marginTop: "1rem" }}>
+              <div className="panel-title">
+                <h2>{pluginEditId ? "Редактировать plugin instance" : "Создать plugin instance"}</h2>
+                {selectedPluginDefinition?.description && (
+                  <p className="form-helper">{selectedPluginDefinition.description}</p>
+                )}
+              </div>
+              <div className="form-stack">
+                <label>
+                  Название
+                  <input value={pluginName} onChange={(e) => setPluginName(e.target.value)} placeholder="prod-secrets" />
+                </label>
+                <label>
+                  Тип
+                  <select
+                    value={pluginType}
+                    onChange={(e) => setPluginType(e.target.value as PluginInstance["type"])}
+                    disabled={pluginEditId !== null}
+                  >
+                    <option value="inventory">inventory</option>
+                    <option value="secrets">secrets</option>
+                    <option value="automation">automation</option>
+                  </select>
+                </label>
+                <label>
+                  Definition
+                  <select
+                    value={pluginDefinitionId}
+                    onChange={(e) => setPluginDefinitionId(e.target.value)}
+                    disabled={pluginEditId !== null}
+                  >
+                    {availablePluginDefinitions.map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.name}
+                      </option>
+                    ))}
+                  </select>
+                  {!availablePluginDefinitions.length && <span className="form-helper">Нет доступных definitions для выбранного типа.</span>}
+                </label>
+                <label>
+                  Config (JSON)
+                  <textarea
+                    rows={6}
+                    value={pluginConfig}
+                    onChange={(e) => setPluginConfig(e.target.value)}
+                    spellCheck={false}
+                  />
+                </label>
+                <label className="checkbox-row">
+                  <input type="checkbox" checked={pluginEnabled} onChange={(e) => setPluginEnabled(e.target.checked)} />
+                  <span>Enabled</span>
+                </label>
+                <label className="checkbox-row">
+                  <input type="checkbox" checked={pluginDefault} onChange={(e) => setPluginDefault(e.target.checked)} />
+                  <span>Default для выбранного типа</span>
+                </label>
+                <div className="row-actions">
+                  <button type="button" className="primary-button" onClick={handlePluginSubmit}>
+                    Сохранить
+                  </button>
+                  <button type="button" className="ghost-button" onClick={resetPluginForm}>
+                    Сброс
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {settingsTab === "admin" && status === "authenticated" && user?.role === "admin" && (
+          <div className="panel">
+            <div className="panel-title">
+              <h2>Глобальные настройки</h2>
+              <p className="form-helper">Управление поведением всего IT Manager (admin-only).</p>
+            </div>
+            <div className="row-actions">
+              <button type="button" className="ghost-button" onClick={() => loadAdminSettings()}>
+                Обновить
+              </button>
+            </div>
+            {adminSettingsLoading && <p>Загружаем...</p>}
+            {adminSettingsError && <p className="text-error">{adminSettingsError}</p>}
+            <div className="form-stack" style={{ marginTop: 0 }}>
+              <label className="checkbox-row">
+                <input
+                  type="checkbox"
+                  checked={maintenanceMode}
+                  onChange={(e) => setMaintenanceMode(e.target.checked)}
+                />
+                <span>Maintenance mode (информирует операторов)</span>
+              </label>
+              <label>
+                Баннер (текст)
+                <input value={bannerMessage} onChange={(e) => setBannerMessage(e.target.value)} placeholder="Плановые работы 22:00–23:00" />
+              </label>
+              <label>
+                Уровень баннера
+                <select value={bannerLevel} onChange={(e) => setBannerLevel(e.target.value as GlobalSettings["banner_level"])}>
+                  <option value="info">info</option>
+                  <option value="warning">warning</option>
+                  <option value="error">error</option>
+                </select>
+              </label>
+              <label>
+                Default project ID
+                <input
+                  type="number"
+                  min={1}
+                  value={defaultProjectId}
+                  onChange={(e) => setDefaultProjectId(e.target.value)}
+                  placeholder="1"
+                />
+                <span className="form-helper">Используется как значение по умолчанию в UI (если задано).</span>
+              </label>
+              <div className="form-actions">
+                <button type="button" className="primary-button" onClick={saveAdminSettings}>
+                  Сохранить
+                </button>
+              </div>
+              {adminSettings && (
+                <p className="form-helper">Текущие: maintenance={String(adminSettings.maintenance_mode)}</p>
+              )}
             </div>
           </div>
         )}

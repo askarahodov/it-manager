@@ -283,7 +283,9 @@ function HostsPage() {
         method: "POST",
         token,
       });
-      setHosts((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
+      setHosts((prev) =>
+        prev.map((item) => (item.id === updated.id ? { ...item, ...updated } : item))
+      );
       pushToast({
         title: "Статус обновлён",
         description: `${updated.name}: ${updated.status}`,
@@ -522,7 +524,19 @@ function HostsPage() {
                 </thead>
                 <tbody>
                   {hosts.map((host) => (
-                    <tr key={host.id} onClick={() => handleSelect(host)}>
+                    <tr
+                      key={host.id}
+                      onClick={() => handleSelect(host)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          handleSelect(host);
+                        }
+                      }}
+                      className={activeHost?.id === host.id ? "active-row" : undefined}
+                      tabIndex={0}
+                      aria-selected={activeHost?.id === host.id}
+                    >
                       <td>{host.name}</td>
                       <td>{host.hostname}:{host.port}</td>
                       <td>{host.os_type}</td>

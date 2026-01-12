@@ -1,4 +1,5 @@
 import logging
+import secrets
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -10,6 +11,9 @@ from app.api.v1.deps import get_current_project_id, get_db, require_permission
 from app.api.v1.schemas.runs import RunRead
 from app.api.v1.schemas.secrets import (
     SecretCreate,
+    SecretLeaseIssueResponse,
+    SecretLeaseRead,
+    SecretLeaseRequest,
     SecretRead,
     SecretReveal,
     SecretRevealInternal,
@@ -19,7 +23,7 @@ from app.api.v1.schemas.secrets import (
     SecretUpdate,
 )
 from app.core.rbac import Permission
-from app.db.models import ApprovalRequest, ApprovalStatus, Host, JobRun, JobStatus, Playbook, Secret, SecretType
+from app.db.models import ApprovalRequest, ApprovalStatus, Host, JobRun, JobStatus, Playbook, Secret, SecretLease, SecretType
 from app.services.audit import audit_log
 from app.services.encryption import decrypt_value, encrypt_value
 from app.services.notifications import notify_event
@@ -51,6 +55,11 @@ def _compute_next_rotation(last_rotated_at: datetime | None, interval_days: int 
         return None
     base = last_rotated_at or datetime.utcnow()
     return base + timedelta(days=interval_days)
+
+
+def _require_admin(principal) -> None:
+    if getattr(principal.role, "value", str(principal.role)) != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Требуются права admin")
 
 
 async def _ensure_rotation_playbook(db: AsyncSession, project_id: int, actor_id: int | None) -> Playbook:
@@ -496,4 +505,125 @@ async def delete_secret(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Не удалось удалить секрет",
         ) from exc
+    return None
+
+
+@router.post("/{secret_id}/lease", response_model=SecretLeaseIssueResponse, status_code=status.HTTP_201_CREATED)
+async def issue_secret_lease(
+    secret_id: int,
+    payload: SecretLeaseRequest,
+    db: AsyncSession = Depends(get_db),
+    principal=Depends(require_permission(Permission.secrets_use)),
+    project_id: int = Depends(get_current_project_id),
+):
+    secret = await db.get(Secret, secret_id)
+    if not secret:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Секрет не найден")
+    if secret.project_id is not None and secret.project_id != project_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Секрет не найден")
+    if not secret.dynamic_enabled:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Dynamic secrets отключены для этого секрета")
+    ttl = payload.ttl_seconds or secret.dynamic_ttl_seconds
+    if not ttl:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="TTL не задан")
+
+    value = secrets.token_urlsafe(24)
+    expires_at = datetime.utcnow() + timedelta(seconds=int(ttl))
+    lease = SecretLease(
+        project_id=project_id,
+        secret_id=secret.id,
+        issued_by=principal.id,
+        expires_at=expires_at,
+        encrypted_value=encrypt_value(value),
+    )
+    db.add(lease)
+    await db.commit()
+    await db.refresh(lease)
+    await audit_log(
+        db,
+        project_id=project_id,
+        actor=principal.email,
+        actor_role=str(principal.role.value),
+        action="secret.lease.issue",
+        entity_type="secret",
+        entity_id=secret.id,
+        meta={"lease_id": lease.id, "ttl_seconds": int(ttl)},
+    )
+    return SecretLeaseIssueResponse(
+        id=lease.id,
+        secret_id=lease.secret_id,
+        issued_by=lease.issued_by,
+        issued_at=lease.issued_at,
+        expires_at=lease.expires_at,
+        revoked_at=lease.revoked_at,
+        value=value,
+    )
+
+
+@router.get("/{secret_id}/leases", response_model=list[SecretLeaseRead])
+async def list_secret_leases(
+    secret_id: int,
+    db: AsyncSession = Depends(get_db),
+    principal=Depends(require_permission(Permission.secrets_read_metadata)),
+    project_id: int = Depends(get_current_project_id),
+):
+    _require_admin(principal)
+    secret = await db.get(Secret, secret_id)
+    if not secret:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Секрет не найден")
+    if secret.project_id is not None and secret.project_id != project_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Секрет не найден")
+    res = await db.execute(
+        select(SecretLease)
+        .where(SecretLease.project_id == project_id)
+        .where(SecretLease.secret_id == secret_id)
+        .order_by(SecretLease.issued_at.desc())
+    )
+    return res.scalars().all()
+
+
+@router.post("/leases/{lease_id}/revoke", status_code=status.HTTP_204_NO_CONTENT)
+async def revoke_secret_lease(
+    lease_id: int,
+    db: AsyncSession = Depends(get_db),
+    principal=Depends(require_permission(Permission.secrets_write)),
+    project_id: int = Depends(get_current_project_id),
+):
+    _require_admin(principal)
+    lease = await db.get(SecretLease, lease_id)
+    if not lease or lease.project_id != project_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lease не найден")
+    if lease.revoked_at:
+        return None
+    lease.revoked_at = datetime.utcnow()
+    await db.commit()
+    await audit_log(
+        db,
+        project_id=project_id,
+        actor=principal.email,
+        actor_role=str(principal.role.value),
+        action="secret.lease.revoke",
+        entity_type="secret",
+        entity_id=lease.secret_id,
+        meta={"lease_id": lease.id},
+    )
+    return None
+
+
+@router.post("/leases/expire", status_code=status.HTTP_204_NO_CONTENT)
+async def expire_secret_leases(
+    db: AsyncSession = Depends(get_db),
+    principal=Depends(require_permission(Permission.secrets_write)),
+):
+    _require_admin(principal)
+    now = datetime.utcnow()
+    res = await db.execute(
+        select(SecretLease)
+        .where(SecretLease.revoked_at.is_(None))
+        .where(SecretLease.expires_at < now)
+    )
+    leases = res.scalars().all()
+    for lease in leases:
+        lease.revoked_at = now
+    await db.commit()
     return None

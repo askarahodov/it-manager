@@ -69,6 +69,7 @@ class WorkerContext:
     recompute_interval: int
     schedule_poll_seconds: int
     rotation_poll_seconds: int
+    lease_expire_poll_seconds: int
     run_timeout_seconds: int
     run_max_retries: int
     run_stale_seconds: int
@@ -84,6 +85,7 @@ def _ctx_from_env() -> WorkerContext:
         recompute_interval=int(os.environ.get("WORKER_RECOMPUTE_INTERVAL_SECONDS", "60")),
         schedule_poll_seconds=int(os.environ.get("WORKER_SCHEDULE_POLL_SECONDS", "10")),
         rotation_poll_seconds=int(os.environ.get("WORKER_ROTATION_POLL_SECONDS", "60")),
+        lease_expire_poll_seconds=int(os.environ.get("WORKER_LEASE_EXPIRE_POLL_SECONDS", "60")),
         run_timeout_seconds=int(os.environ.get("WORKER_RUN_TIMEOUT_SECONDS", "1800")),
         run_max_retries=int(os.environ.get("WORKER_RUN_MAX_RETRIES", "3")),
         run_stale_seconds=int(os.environ.get("WORKER_RUN_STALE_SECONDS", "3600")),
@@ -443,6 +445,30 @@ async def secret_rotation_loop(ctx: WorkerContext) -> None:
             except Exception as exc:  # noqa: BLE001
                 logger.exception("Secret rotation loop error: %s", exc)
             await asyncio.sleep(ctx.rotation_poll_seconds)
+
+
+async def secret_lease_expire_loop(ctx: WorkerContext) -> None:
+    logger.info("Secret lease expire loop started poll=%ss", ctx.lease_expire_poll_seconds)
+    await asyncio.sleep(5)
+    async with httpx.AsyncClient(base_url=ctx.backend_url, timeout=20) as client:
+        while True:
+            token = _admin_token(ctx.secret_key)
+            try:
+                resp = await _backend_post(
+                    client,
+                    token,
+                    "/api/v1/secrets/leases/expire",
+                    request_id=_make_request_id("worker-lease-expire"),
+                )
+                if resp.status_code != 204:
+                    logger.warning(
+                        "Lease expire failed status=%s body=%s",
+                        resp.status_code,
+                        resp.text[:200],
+                    )
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("Lease expire loop error: %s", exc)
+            await asyncio.sleep(ctx.lease_expire_poll_seconds)
 
 async def stale_runs_watchdog_loop(ctx: WorkerContext) -> None:
     """Watchdog для зависших запусков.
@@ -1263,6 +1289,7 @@ async def main() -> None:
         schedule_runs_loop(ctx),
         stale_runs_watchdog_loop(ctx),
         secret_rotation_loop(ctx),
+        secret_lease_expire_loop(ctx),
     )
 
 

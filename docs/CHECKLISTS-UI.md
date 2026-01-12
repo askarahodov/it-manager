@@ -105,9 +105,23 @@
 - [x] Ручная ротация с вводом нового значения.
 - [x] Опция “применить ротацию на хостах” для password-секретов.
 
+## Secrets: Dynamic (UI)
+
+- [x] Настройка TTL для lease.
+- [x] Выдача lease из списка секретов.
+
 ## Notifications (UI)
 
 - [x] Webhook endpoints: CRUD + выбор событий.
+
+## Admin settings (UI)
+
+- [x] Вкладка администрирования с глобальными настройками (maintenance/banner/default project).
+- [x] Глобальный баннер/maintenance отображается в topbar для всех пользователей.
+
+## Plugins (UI)
+
+- [x] Вкладка Plugins: список instances + CRUD + выбор default/enable.
 
 ## Secrets: Notifications (UI)
 
@@ -127,3 +141,4 @@
 - [x] Привести локализацию Hosts/filters к единому русскому словарю.
 - [x] Добавить `aria-sort` и улучшить affordance сортировки в заголовках таблиц.
 - [x] Сделать “sticky actions”/якоря для длинных форм Automation.
+- [x] Hosts: подсветка выбранной строки + выбор с клавиатуры (Enter/Space).

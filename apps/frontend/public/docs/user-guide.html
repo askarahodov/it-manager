@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>IT Manager — User Guide</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+      }
+      body {
+        margin: 0;
+        padding: 2rem 1.5rem 4rem;
+        background: #0f172a;
+        color: #e2e8f0;
+        line-height: 1.6;
+      }
+      a {
+        color: #93c5fd;
+        text-decoration: none;
+      }
+      a:hover {
+        text-decoration: underline;
+      }
+      header {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+        margin-bottom: 2rem;
+      }
+      nav {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        font-size: 0.9rem;
+      }
+      nav a {
+        padding: 0.35rem 0.65rem;
+        border-radius: 999px;
+        border: 1px solid rgba(148, 163, 184, 0.35);
+        background: rgba(30, 41, 59, 0.45);
+      }
+      section {
+        background: #111827;
+        border: 1px solid rgba(148, 163, 184, 0.2);
+        border-radius: 12px;
+        padding: 1.25rem;
+        margin-bottom: 1rem;
+      }
+      h1 {
+        margin: 0;
+        font-size: 1.6rem;
+      }
+      h2 {
+        margin-top: 0;
+        font-size: 1.2rem;
+      }
+      code, pre {
+        background: rgba(15, 23, 42, 0.9);
+        border: 1px solid rgba(148, 163, 184, 0.2);
+        border-radius: 8px;
+        padding: 0.2rem 0.4rem;
+      }
+      pre {
+        padding: 0.75rem;
+        overflow: auto;
+      }
+      ul {
+        margin: 0.5rem 0 0;
+        padding-left: 1.25rem;
+      }
+      .note {
+        font-size: 0.9rem;
+        color: #cbd5f5;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>IT Manager — пользовательская документация</h1>
+      <p class="note">Краткое руководство по каждому разделу интерфейса.</p>
+      <nav>
+        <a href="#intro">Введение</a>
+        <a href="#projects">Проекты</a>
+        <a href="#dashboard">Dashboard</a>
+        <a href="#hosts">Hosts</a>
+        <a href="#groups">Groups</a>
+        <a href="#secrets">Secrets</a>
+        <a href="#automation">Automation</a>
+        <a href="#ssh">SSH Terminal</a>
+        <a href="#settings">Settings</a>
+        <a href="#notifications">Notifications</a>
+        <a href="#plugins">Plugins</a>
+        <a href="#audit">Audit Log</a>
+        <a href="#doxygen">Doxygen</a>
+      </nav>
+    </header>
+
+    <section id="intro">
+      <h2>Введение</h2>
+      <p>IT Manager — веб‑панель для инвентаризации хостов, управления доступом и автоматизации (Ansible).</p>
+      <h3>Роли</h3>
+      <ul>
+        <li>admin — полный доступ, включая reveal секретов и настройки.</li>
+        <li>operator — управление хостами/группами, запуск автоматизации.</li>
+        <li>viewer — только просмотр.</li>
+        <li>automation-only — только автоматизация.</li>
+      </ul>
+      <h3>Вход</h3>
+      <ol>
+        <li>Откройте раздел Settings.</li>
+        <li>Введите email/пароль.</li>
+        <li>Убедитесь, что в topbar выбран корректный проект.</li>
+      </ol>
+    </section>
+
+    <section id="projects">
+      <h2>Проекты (Projects / Tenants)</h2>
+      <p>Проект изолирует хосты/группы/секреты/плейбуки/запуски.</p>
+      <ul>
+        <li>Переключатель проекта находится в topbar.</li>
+        <li>После смены проекта все списки перезагружаются.</li>
+      </ul>
+    </section>
+
+    <section id="dashboard">
+      <h2>Dashboard</h2>
+      <ul>
+        <li>Статус хостов (online/offline/unknown).</li>
+        <li>Последние запуски автоматизации.</li>
+        <li>Секреты с ближайшими сроками истечения.</li>
+        <li>Последние SSH‑сессии (admin).</li>
+      </ul>
+      <p class="note">Если данные не обновились, нажмите “Обновить”.</p>
+    </section>
+
+    <section id="hosts">
+      <h2>Hosts (Инвентаризация)</h2>
+      <h3>Список</h3>
+      <ul>
+        <li>Поиск по имени/hostname.</li>
+        <li>Фильтры по status, environment, os и тегам.</li>
+        <li>Клик по строке открывает редактирование.</li>
+      </ul>
+      <h3>Действия</h3>
+      <ul>
+        <li>Проверить — status‑check.</li>
+        <li>Детали — карточка хоста.</li>
+        <li>Терминал — SSH терминал в браузере.</li>
+      </ul>
+      <h3>Пример тегов</h3>
+      <pre>{"role":"db","env":"prod"}</pre>
+    </section>
+
+    <section id="groups">
+      <h2>Groups</h2>
+      <p>Группы бывают статические и динамические.</p>
+      <h3>Static</h3>
+      <p>Выбор конкретных хостов.</p>
+      <h3>Dynamic</h3>
+      <p>Правило в JSON (rule), по среде/тегам.</p>
+      <h3>Пример правила</h3>
+      <pre>{"environments":["prod"],"tags":{"role":"db"}}</pre>
+    </section>
+
+    <section id="secrets">
+      <h2>Secrets</h2>
+      <ul>
+        <li>Типы: text, password, token, private_key.</li>
+        <li>Reveal доступен только admin.</li>
+        <li>Rotation: ручная и по интервалу.</li>
+      </ul>
+      <h3>Dynamic secrets (leases)</h3>
+      <ul>
+        <li>Настройка TTL.</li>
+        <li>Кнопка Lease выдаёт временное значение.</li>
+      </ul>
+    </section>
+
+    <section id="automation">
+      <h2>Automation</h2>
+      <h3>Playbooks</h3>
+      <ul>
+        <li>Хранение YAML в stored_content.</li>
+        <li>Git‑репозиторий (URL/ref/path) + Sync.</li>
+      </ul>
+      <h3>Templates / Instances</h3>
+      <ul>
+        <li>Template содержит schema и defaults.</li>
+        <li>Instance хранит values + цели (hosts/groups).</li>
+      </ul>
+      <h3>Triggers</h3>
+      <p>Автозапуск по событиям: host_created, host_tags_changed, secret_rotated.</p>
+      <h3>Runs / Approvals</h3>
+      <p>История запусков, live‑лог, approvals для prod.</p>
+      <h3>Пример extra_vars</h3>
+      <pre>{"app_version":"1.2.3","feature_flag":true}</pre>
+    </section>
+
+    <section id="ssh">
+      <h2>SSH Terminal</h2>
+      <ul>
+        <li>Доступен на карточке хоста.</li>
+        <li>Поддержка password и private key.</li>
+        <li>При включённой записи — сохраняется transcript.</li>
+      </ul>
+    </section>
+
+    <section id="settings">
+      <h2>Settings</h2>
+      <ul>
+        <li>Сессия и режим таблиц.</li>
+        <li>Пользователи и доступы (admin).</li>
+        <li>Проекты и переключение.</li>
+        <li>Audit log (admin).</li>
+        <li>Notifications (admin).</li>
+        <li>Plugins (admin).</li>
+        <li>Admin settings (maintenance/banner/default project).</li>
+      </ul>
+    </section>
+
+    <section id="notifications">
+      <h2>Notifications</h2>
+      <p>Webhooks и каналы: webhook/slack/telegram/email. Можно выбрать события (run.failed, approval.requested, secret.expiring и др.).</p>
+    </section>
+
+    <section id="plugins">
+      <h2>Plugins</h2>
+      <p>Подключаемые backends для inventory/secrets/automation. Вкладка Plugins (admin): создание instance, выбор default, enable/disable.</p>
+    </section>
+
+    <section id="audit">
+      <h2>Audit Log</h2>
+      <p>Admin‑раздел для просмотра событий CRUD/SSH/Automation с фильтрами и экспортом.</p>
+    </section>
+
+    <section id="doxygen">
+      <h2>Doxygen</h2>
+      <p>Doxygen запускается при старте docker compose (сервис doxygen).</p>
+      <pre>docker compose -f deploy/docker-compose.yml up -d</pre>
+      <p>Ручной запуск:</p>
+      <pre>docker compose -f deploy/docker-compose.yml run --rm doxygen</pre>
+      <p>Результат: <code>docs/doxygen/html/index.html</code></p>
+    </section>
+  </body>
+</html>

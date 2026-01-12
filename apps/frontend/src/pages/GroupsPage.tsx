@@ -4,6 +4,7 @@ import { apiFetch } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { useConfirm } from "../components/ui/ConfirmProvider";
 import { useToast } from "../components/ui/ToastProvider";
+import EmptyState from "../components/ui/EmptyState";
 import { formatError } from "../lib/errors";
 
 type GroupType = "static" | "dynamic";
@@ -292,6 +293,9 @@ function GroupsPage() {
           <button type="button" className="ghost-button" onClick={loadAll}>
             Обновить
           </button>
+          <a className="help-link" href="/docs/user-guide.html#groups" target="_blank" rel="noreferrer">
+            Документация
+          </a>
         </div>
       </header>
 
@@ -303,7 +307,18 @@ function GroupsPage() {
             <p className="form-helper">Нажмите на группу, чтобы открыть детали.</p>
           </div>
           {loading && <p>Загружаем...</p>}
-          {!loading && groups.length === 0 && <p>Групп пока нет</p>}
+          {!loading && groups.length === 0 && (
+            <EmptyState
+              title="Групп пока нет"
+              description="Создайте первую группу, чтобы управлять хостами по логике."
+              actionLabel="Создать группу"
+              onAction={() => {
+                setSelected(null);
+                setForm(defaultGroupForm);
+                setHostFilter("");
+              }}
+            />
+          )}
           {groups.length > 0 && (
             <div className="table-scroll">
               <table className="hosts-table">

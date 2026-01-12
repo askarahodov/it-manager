@@ -842,6 +842,11 @@ function SettingsPage() {
           <p className="page-kicker">Учетные записи</p>
           <h1>Настройки</h1>
         </div>
+        <div className="row-actions">
+          <a className="help-link" href="/docs/user-guide.html#settings" target="_blank" rel="noreferrer">
+            Документация
+          </a>
+        </div>
       </header>
 
       <div className="tabs">

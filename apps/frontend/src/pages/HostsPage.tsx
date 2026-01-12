@@ -4,6 +4,7 @@ import { apiFetch } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import TerminalPane from "../components/TerminalPane";
 import { useConfirm } from "../components/ui/ConfirmProvider";
+import EmptyState from "../components/ui/EmptyState";
 import { useToast } from "../components/ui/ToastProvider";
 import { formatError } from "../lib/errors";
 
@@ -352,12 +353,17 @@ function HostsPage() {
           <p className="page-kicker">Инвентаризация</p>
           <h1>Хосты</h1>
         </div>
-        <div className="status-summary">
-          {Object.entries(totals).map(([status, value]) => (
-            <div key={status} className={`status-pill mini ${status}`}>
-              {status}: {value}
-            </div>
-          ))}
+        <div className="row-actions" style={{ alignItems: "center", flexWrap: "wrap" }}>
+          <div className="status-summary">
+            {Object.entries(totals).map(([status, value]) => (
+              <div key={status} className={`status-pill mini ${status}`}>
+                {status}: {value}
+              </div>
+            ))}
+          </div>
+          <a className="help-link" href="/docs/user-guide.html#hosts" target="_blank" rel="noreferrer">
+            Документация
+          </a>
         </div>
       </header>
 
@@ -451,7 +457,18 @@ function HostsPage() {
           )}
           {loading && <p>Загружаем хосты...</p>}
           {error && <p className="text-error">{error}</p>}
-          {!loading && token && hosts.length === 0 && <p>Хосты отсутствуют</p>}
+          {!loading && token && hosts.length === 0 && (
+            <EmptyState
+              title="Хостов пока нет"
+              description="Добавьте первый хост, чтобы начать инвентаризацию и проверку статуса."
+              actionLabel="Добавить хост"
+              onAction={() => {
+                setHostsTab("form");
+                setFormMode("create");
+                setActiveHost(null);
+              }}
+            />
+          )}
           {!loading && !token && <p className="text-error">Нет токена — войдите в Settings.</p>}
           {loading && hosts.length === 0 && (
             <div className="table-scroll" style={{ maxHeight: "clamp(320px, 55vh, 720px)" }}>

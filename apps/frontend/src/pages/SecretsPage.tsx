@@ -4,6 +4,7 @@ import { apiFetch } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { useConfirm } from "../components/ui/ConfirmProvider";
 import { useToast } from "../components/ui/ToastProvider";
+import EmptyState from "../components/ui/EmptyState";
 import { formatError } from "../lib/errors";
 
 type SecretType = "text" | "password" | "token" | "private_key";
@@ -390,12 +391,17 @@ function SecretsPage() {
           <p className="page-kicker">Vault</p>
           <h1>Секреты</h1>
         </div>
-        <div className="status-summary">
-          {Object.entries(stats).map(([key, value]) => (
-            <div key={key} className="status-pill mini unknown">
-              {key}: {value}
-            </div>
-          ))}
+        <div className="row-actions" style={{ alignItems: "center", flexWrap: "wrap" }}>
+          <div className="status-summary">
+            {Object.entries(stats).map(([key, value]) => (
+              <div key={key} className="status-pill mini unknown">
+                {key}: {value}
+              </div>
+            ))}
+          </div>
+          <a className="help-link" href="/docs/user-guide.html#secrets" target="_blank" rel="noreferrer">
+            Документация
+          </a>
         </div>
       </header>
 
@@ -425,7 +431,18 @@ function SecretsPage() {
             <p>Значения не отображаются. Reveal доступен только admin.</p>
           </div>
           {loading && <p>Загружаем...</p>}
-          {!loading && secrets.length === 0 && <p>Секретов пока нет</p>}
+          {!loading && secrets.length === 0 && (
+            <EmptyState
+              title="Секретов пока нет"
+              description="Создайте первый секрет для подключения SSH и автоматизации."
+              actionLabel="Создать секрет"
+              onAction={() => {
+                setSecretsTab("manage");
+                setEditId(null);
+                setForm({ ...defaultForm });
+              }}
+            />
+          )}
           {loading && secrets.length === 0 && (
             <div className="table-scroll">
               <table className="hosts-table">

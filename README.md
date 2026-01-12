@@ -149,6 +149,17 @@ Integration-тесты: `docker compose -f deploy/docker-compose.yml exec -T -w 
 - `/docs` — архитектура, roadmap, чек-листы, ADR.
 - `/scripts` — bootstrap/lint/test.
 
+## Пользовательская документация
+
+- `docs/USER_GUIDE.md` — инструкция по разделам интерфейса.
+- `apps/frontend/public/docs/user-guide.html` — HTML-версия (с якорями для UI).
+- В UI доступны ссылки на нужные разделы документации.
+
+## Doxygen
+
+- Doxygen запускается при старте `docker compose` (сервис `doxygen`).
+- Результат: `docs/doxygen/html/index.html`.
+
 ## Что дальше
 
 - HA/scale: multiple workers + distributed locks + sharding.

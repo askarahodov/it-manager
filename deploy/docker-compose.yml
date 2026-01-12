@@ -106,6 +106,14 @@ services:
       timeout: 5s
       retries: 10
 
+  doxygen:
+    image: doxygen/doxygen:1.9.8
+    working_dir: /workspace
+    command: ["doxygen", "/workspace/docs/Doxyfile"]
+    restart: "no"
+    volumes:
+      - ..:/workspace
+
   # Встроенный SSH-хост для разработки/тестов терминала и Ansible.
   # Доступен только внутри docker network.
   # Логин: demo / demo123

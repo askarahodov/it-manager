@@ -156,6 +156,9 @@ function DashboardPage() {
           <button type="button" className="ghost-button" onClick={loadDashboard} disabled={loading}>
             Обновить
           </button>
+          <a className="help-link" href="/docs/user-guide.html#dashboard" target="_blank" rel="noreferrer">
+            Документация
+          </a>
         </div>
       </header>
 

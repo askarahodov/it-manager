@@ -91,6 +91,7 @@
 - [x] Approvals: просмотр diff параметров (before/after) в отдельном UI.
 - [x] Triggers: CRUD интерфейс (host_created/host_tags_changed/secret_rotated).
 - [x] Webhook: генерация/просмотр токена плейбука + подсказки.
+- [x] Tables: scroll + sticky header для playbooks/templates/triggers/runs.
 
 ## Automation: Git integration (UI)
 
@@ -142,3 +143,6 @@
 - [x] Добавить `aria-sort` и улучшить affordance сортировки в заголовках таблиц.
 - [x] Сделать “sticky actions”/якоря для длинных форм Automation.
 - [x] Hosts: подсветка выбранной строки + выбор с клавиатуры (Enter/Space).
+- [x] Empty states: CTA для Hosts/Secrets/Automation playbooks.
+- [x] Empty states: CTA для Groups/Automation templates/instances/triggers.
+- [x] Help links: ссылки на пользовательскую документацию в ключевых разделах.

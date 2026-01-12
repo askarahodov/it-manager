@@ -4,6 +4,7 @@ import { apiFetch } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { useConfirm } from "../components/ui/ConfirmProvider";
 import { useToast } from "../components/ui/ToastProvider";
+import EmptyState from "../components/ui/EmptyState";
 import { formatError } from "../lib/errors";
 import { getProjectId } from "../lib/project";
 
@@ -1116,6 +1117,9 @@ function AutomationPage() {
           <button type="button" className="ghost-button" onClick={refreshAll}>
             Обновить
           </button>
+          <a className="help-link" href="/docs/user-guide.html#automation" target="_blank" rel="noreferrer">
+            Документация
+          </a>
         </div>
       </header>
 
@@ -1161,55 +1165,66 @@ function AutomationPage() {
             <h2>Шаблоны плейбуков</h2>
             <p className="form-helper">Vars schema и defaults для будущих инстансов.</p>
           </div>
-          {templates.length === 0 && <p>Шаблонов пока нет</p>}
+          {!loading && templates.length === 0 && (
+            <EmptyState
+              title="Шаблонов пока нет"
+              description="Создайте vars schema и defaults для будущих инстансов."
+              actionLabel="Создать шаблон"
+              onAction={resetTemplateForm}
+            />
+          )}
           {loading && templates.length === 0 && (
-            <table className="hosts-table">
-              <thead>
-                <tr>
-                  <th>Название</th>
-                  <th>Описание</th>
-                  <th>Действия</th>
-                </tr>
-              </thead>
-              <tbody>
-                {Array.from({ length: 4 }).map((_, idx) => (
-                  <tr key={`skeleton-template-${idx}`}>
-                    <td><span className="skeleton-line" /></td>
-                    <td><span className="skeleton-line" /></td>
-                    <td><span className="skeleton-line" /></td>
+            <div className="table-scroll">
+              <table className="hosts-table">
+                <thead>
+                  <tr>
+                    <th>Название</th>
+                    <th>Описание</th>
+                    <th>Действия</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {Array.from({ length: 4 }).map((_, idx) => (
+                    <tr key={`skeleton-template-${idx}`}>
+                      <td><span className="skeleton-line" /></td>
+                      <td><span className="skeleton-line" /></td>
+                      <td><span className="skeleton-line" /></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
           {templates.length > 0 && (
-            <table className="hosts-table">
-              <thead>
-                <tr>
-                  <th>Название</th>
-                  <th>Описание</th>
-                  <th>Действия</th>
-                </tr>
-              </thead>
-              <tbody>
-                {templates.map((tpl) => (
-                  <tr key={tpl.id}>
-                    <td>{tpl.name}</td>
-                    <td>{tpl.description ?? ""}</td>
-                    <td>
-                      <div className="row-actions">
-                        <button type="button" className="ghost-button" onClick={() => startEditTemplate(tpl)} disabled={!isAdmin}>
-                          Редактировать
-                        </button>
-                        <button type="button" className="ghost-button" onClick={() => deleteTemplate(tpl)} disabled={!isAdmin}>
-                          Удалить
-                        </button>
-                      </div>
-                    </td>
+            <div className="table-scroll">
+              <table className="hosts-table">
+                <thead>
+                  <tr>
+                    <th>Название</th>
+                    <th>Описание</th>
+                    <th>Действия</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {templates.map((tpl) => (
+                    <tr key={tpl.id}>
+                      <td>{tpl.name}</td>
+                      <td>{tpl.description ?? ""}</td>
+                      <td>
+                        <div className="row-actions">
+                          <button type="button" className="ghost-button" onClick={() => startEditTemplate(tpl)} disabled={!isAdmin}>
+                            Редактировать
+                          </button>
+                          <button type="button" className="ghost-button" onClick={() => deleteTemplate(tpl)} disabled={!isAdmin}>
+                            Удалить
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </div>
 
@@ -1256,84 +1271,95 @@ function AutomationPage() {
             <h2>Инстансы плейбуков</h2>
             <p className="form-helper">Значения шаблонов + привязка целей. Для запуска выберите плейбук в строке.</p>
           </div>
-          {instances.length === 0 && <p>Инстансов пока нет</p>}
+          {!loading && instances.length === 0 && (
+            <EmptyState
+              title="Инстансов пока нет"
+              description="Создайте инстанс и привяжите цели для запуска."
+              actionLabel="Создать инстанс"
+              onAction={resetInstanceForm}
+            />
+          )}
           {loading && instances.length === 0 && (
-            <table className="hosts-table">
-              <thead>
-                <tr>
-                  <th>Название</th>
-                  <th>Шаблон</th>
-                  <th>Цели</th>
-                  <th>Действия</th>
-                </tr>
-              </thead>
-              <tbody>
-                {Array.from({ length: 4 }).map((_, idx) => (
-                  <tr key={`skeleton-instance-${idx}`}>
-                    <td><span className="skeleton-line" /></td>
-                    <td><span className="skeleton-line" /></td>
-                    <td><span className="skeleton-line small" /></td>
-                    <td><span className="skeleton-line" /></td>
+            <div className="table-scroll">
+              <table className="hosts-table">
+                <thead>
+                  <tr>
+                    <th>Название</th>
+                    <th>Шаблон</th>
+                    <th>Цели</th>
+                    <th>Действия</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {Array.from({ length: 4 }).map((_, idx) => (
+                    <tr key={`skeleton-instance-${idx}`}>
+                      <td><span className="skeleton-line" /></td>
+                      <td><span className="skeleton-line" /></td>
+                      <td><span className="skeleton-line small" /></td>
+                      <td><span className="skeleton-line" /></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
           {instances.length > 0 && (
-            <table className="hosts-table">
-              <thead>
-                <tr>
-                  <th>Название</th>
-                  <th>Шаблон</th>
-                  <th>Цели</th>
-                  <th>Действия</th>
-                </tr>
-              </thead>
-              <tbody>
-                {instances.map((inst) => {
-                  const templateName = templates.find((t) => t.id === inst.template_id)?.name ?? `#${inst.template_id}`;
-                  return (
-                    <tr key={inst.id}>
-                      <td>{inst.name}</td>
-                      <td>{templateName}</td>
-                      <td>{(inst.host_ids?.length ?? 0) + (inst.group_ids?.length ?? 0)}</td>
-                      <td>
-                        <div className="row-actions">
-                          <select
-                            value={String(instanceRunPlaybookIds[inst.id] ?? "")}
-                            onChange={(e) =>
-                              setInstanceRunPlaybookIds((prev) => ({ ...prev, [inst.id]: e.target.value ? Number(e.target.value) : "" }))
-                            }
-                            title="Плейбук для запуска"
-                          >
-                            <option value="">плейбук…</option>
-                            {playbooks.map((pb) => (
-                              <option key={pb.id} value={pb.id}>
-                                {pb.name}
-                              </option>
-                            ))}
-                          </select>
-                          <button type="button" className="ghost-button" onClick={() => startEditInstance(inst)} disabled={!isAdmin}>
-                            Редактировать
-                          </button>
-                          <button
-                            type="button"
-                            className="ghost-button"
-                            onClick={() => runInstance(inst)}
-                            disabled={!canRun || !instanceRunPlaybookIds[inst.id]}
-                          >
-                            Запуск
-                          </button>
-                          <button type="button" className="ghost-button" onClick={() => deleteInstance(inst)} disabled={!isAdmin}>
-                            Удалить
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+            <div className="table-scroll">
+              <table className="hosts-table">
+                <thead>
+                  <tr>
+                    <th>Название</th>
+                    <th>Шаблон</th>
+                    <th>Цели</th>
+                    <th>Действия</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {instances.map((inst) => {
+                    const templateName = templates.find((t) => t.id === inst.template_id)?.name ?? `#${inst.template_id}`;
+                    return (
+                      <tr key={inst.id}>
+                        <td>{inst.name}</td>
+                        <td>{templateName}</td>
+                        <td>{(inst.host_ids?.length ?? 0) + (inst.group_ids?.length ?? 0)}</td>
+                        <td>
+                          <div className="row-actions">
+                            <select
+                              value={String(instanceRunPlaybookIds[inst.id] ?? "")}
+                              onChange={(e) =>
+                                setInstanceRunPlaybookIds((prev) => ({ ...prev, [inst.id]: e.target.value ? Number(e.target.value) : "" }))
+                              }
+                              title="Плейбук для запуска"
+                            >
+                              <option value="">плейбук…</option>
+                              {playbooks.map((pb) => (
+                                <option key={pb.id} value={pb.id}>
+                                  {pb.name}
+                                </option>
+                              ))}
+                            </select>
+                            <button type="button" className="ghost-button" onClick={() => startEditInstance(inst)} disabled={!isAdmin}>
+                              Редактировать
+                            </button>
+                            <button
+                              type="button"
+                              className="ghost-button"
+                              onClick={() => runInstance(inst)}
+                              disabled={!canRun || !instanceRunPlaybookIds[inst.id]}
+                            >
+                              Запуск
+                            </button>
+                            <button type="button" className="ghost-button" onClick={() => deleteInstance(inst)} disabled={!isAdmin}>
+                              Удалить
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           )}
         </div>
 
@@ -1504,65 +1530,76 @@ function AutomationPage() {
             <h2>Триггеры плейбуков</h2>
             <p className="form-helper">Автозапуск по событиям: создание хоста, изменение тегов.</p>
           </div>
-          {triggers.length === 0 && <p>Триггеров пока нет</p>}
+          {!loading && triggers.length === 0 && (
+            <EmptyState
+              title="Триггеров пока нет"
+              description="Настройте автозапуск по событиям."
+              actionLabel="Создать триггер"
+              onAction={resetTriggerForm}
+            />
+          )}
           {loading && triggers.length === 0 && (
-            <table className="hosts-table">
-              <thead>
-                <tr>
-                  <th>ID</th>
-                  <th>Тип</th>
-                  <th>Плейбук</th>
-                  <th>Статус</th>
-                  <th>Действия</th>
-                </tr>
-              </thead>
-              <tbody>
-                {Array.from({ length: 3 }).map((_, idx) => (
-                  <tr key={`skeleton-trigger-${idx}`}>
-                    <td><span className="skeleton-line small" /></td>
-                    <td><span className="skeleton-line" /></td>
-                    <td><span className="skeleton-line" /></td>
-                    <td><span className="skeleton-line small" /></td>
-                    <td><span className="skeleton-line" /></td>
+            <div className="table-scroll">
+              <table className="hosts-table">
+                <thead>
+                  <tr>
+                    <th>ID</th>
+                    <th>Тип</th>
+                    <th>Плейбук</th>
+                    <th>Статус</th>
+                    <th>Действия</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {Array.from({ length: 3 }).map((_, idx) => (
+                    <tr key={`skeleton-trigger-${idx}`}>
+                      <td><span className="skeleton-line small" /></td>
+                      <td><span className="skeleton-line" /></td>
+                      <td><span className="skeleton-line" /></td>
+                      <td><span className="skeleton-line small" /></td>
+                      <td><span className="skeleton-line" /></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
           {triggers.length > 0 && (
-            <table className="hosts-table">
-              <thead>
-                <tr>
-                  <th>ID</th>
-                  <th>Тип</th>
-                  <th>Плейбук</th>
-                  <th>Статус</th>
-                  <th>Действия</th>
-                </tr>
-              </thead>
-              <tbody>
-                {triggers.map((tr) => (
-                  <tr key={tr.id}>
-                    <td>{tr.id}</td>
-                    <td>{tr.type}</td>
-                    <td>{playbookById.get(tr.playbook_id)?.name ?? `#${tr.playbook_id}`}</td>
-                    <td>
-                      <span className={`status-pill ${tr.enabled ? "success" : "pending"}`}>{tr.enabled ? "enabled" : "disabled"}</span>
-                    </td>
-                    <td>
-                      <div className="row-actions">
-                        <button type="button" className="ghost-button" onClick={() => startEditTrigger(tr)} disabled={!isAdmin}>
-                          Редактировать
-                        </button>
-                        <button type="button" className="ghost-button" onClick={() => deleteTrigger(tr)} disabled={!isAdmin}>
-                          Удалить
-                        </button>
-                      </div>
-                    </td>
+            <div className="table-scroll">
+              <table className="hosts-table">
+                <thead>
+                  <tr>
+                    <th>ID</th>
+                    <th>Тип</th>
+                    <th>Плейбук</th>
+                    <th>Статус</th>
+                    <th>Действия</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {triggers.map((tr) => (
+                    <tr key={tr.id}>
+                      <td>{tr.id}</td>
+                      <td>{tr.type}</td>
+                      <td>{playbookById.get(tr.playbook_id)?.name ?? `#${tr.playbook_id}`}</td>
+                      <td>
+                        <span className={`status-pill ${tr.enabled ? "success" : "pending"}`}>{tr.enabled ? "enabled" : "disabled"}</span>
+                      </td>
+                      <td>
+                        <div className="row-actions">
+                          <button type="button" className="ghost-button" onClick={() => startEditTrigger(tr)} disabled={!isAdmin}>
+                            Редактировать
+                          </button>
+                          <button type="button" className="ghost-button" onClick={() => deleteTrigger(tr)} disabled={!isAdmin}>
+                            Удалить
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </div>
 
@@ -1638,78 +1675,89 @@ function AutomationPage() {
             <h2>Плейбуки</h2>
             <p className="form-helper">MVP: хранение как YAML (stored_content).</p>
           </div>
-          {playbooks.length === 0 && <p>Плейбуков пока нет</p>}
+          {!loading && playbooks.length === 0 && (
+            <EmptyState
+              title="Плейбуков пока нет"
+              description="Создайте плейбук вручную или подключите Git репозиторий."
+              actionLabel="Создать плейбук"
+              onAction={resetPlaybookForm}
+            />
+          )}
           {loading && playbooks.length === 0 && (
-            <table className="hosts-table">
-              <thead>
-                <tr>
-                  <th>Название</th>
-                  <th>Описание</th>
-                  <th>Repo</th>
-                  <th>Запуски</th>
-                  <th>Действия</th>
-                </tr>
-              </thead>
-              <tbody>
-                {Array.from({ length: 4 }).map((_, idx) => (
-                  <tr key={`skeleton-playbook-${idx}`}>
-                    <td><span className="skeleton-line" /></td>
-                    <td><span className="skeleton-line" /></td>
-                    <td><span className="skeleton-line" /></td>
-                    <td><span className="skeleton-line small" /></td>
-                    <td><span className="skeleton-line" /></td>
+            <div className="table-scroll">
+              <table className="hosts-table">
+                <thead>
+                  <tr>
+                    <th>Название</th>
+                    <th>Описание</th>
+                    <th>Repo</th>
+                    <th>Запуски</th>
+                    <th>Действия</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {Array.from({ length: 4 }).map((_, idx) => (
+                    <tr key={`skeleton-playbook-${idx}`}>
+                      <td><span className="skeleton-line" /></td>
+                      <td><span className="skeleton-line" /></td>
+                      <td><span className="skeleton-line" /></td>
+                      <td><span className="skeleton-line small" /></td>
+                      <td><span className="skeleton-line" /></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
           {playbooks.length > 0 && (
-            <table className="hosts-table">
-              <thead>
-                <tr>
-                  <th>Название</th>
-                  <th>Описание</th>
-                  <th>Repo</th>
-                  <th>Запуски</th>
-                  <th>Действия</th>
-                </tr>
-              </thead>
-              <tbody>
-                {playbooks.map((pb) => (
-                  <tr key={pb.id}>
-                    <td>{pb.name}</td>
-                    <td>{pb.description ?? ""}</td>
-                    <td>
-                      {pb.repo_url ? (
-                        <div>
-                          <div>{pb.repo_url}</div>
-                          <div className="form-helper">path: {pb.repo_playbook_path ?? "—"}</div>
-                          {pb.repo_last_commit && (
-                            <div className="form-helper">commit: {pb.repo_last_commit.slice(0, 8)}</div>
-                          )}
-                        </div>
-                      ) : (
-                        "—"
-                      )}
-                    </td>
-                    <td>{runsByPlaybook.get(pb.id) ?? 0}</td>
-                    <td>
-                      <div className="row-actions">
-                        <button type="button" className="ghost-button" onClick={() => startEditPlaybook(pb)} disabled={!isAdmin}>
-                          Редактировать
-                        </button>
-                        <button type="button" className="ghost-button" onClick={() => openRunModal(pb)} disabled={!canRun}>
-                          Запуск
-                        </button>
-                        <button type="button" className="ghost-button" disabled={!isAdmin} onClick={() => deletePlaybook(pb)}>
-                          Удалить
-                        </button>
-                      </div>
-                    </td>
+            <div className="table-scroll">
+              <table className="hosts-table">
+                <thead>
+                  <tr>
+                    <th>Название</th>
+                    <th>Описание</th>
+                    <th>Repo</th>
+                    <th>Запуски</th>
+                    <th>Действия</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {playbooks.map((pb) => (
+                    <tr key={pb.id}>
+                      <td>{pb.name}</td>
+                      <td>{pb.description ?? ""}</td>
+                      <td>
+                        {pb.repo_url ? (
+                          <div>
+                            <div>{pb.repo_url}</div>
+                            <div className="form-helper">path: {pb.repo_playbook_path ?? "—"}</div>
+                            {pb.repo_last_commit && (
+                              <div className="form-helper">commit: {pb.repo_last_commit.slice(0, 8)}</div>
+                            )}
+                          </div>
+                        ) : (
+                          "—"
+                        )}
+                      </td>
+                      <td>{runsByPlaybook.get(pb.id) ?? 0}</td>
+                      <td>
+                        <div className="row-actions">
+                          <button type="button" className="ghost-button" onClick={() => startEditPlaybook(pb)} disabled={!isAdmin}>
+                            Редактировать
+                          </button>
+                          <button type="button" className="ghost-button" onClick={() => openRunModal(pb)} disabled={!canRun}>
+                            Запуск
+                          </button>
+                          <button type="button" className="ghost-button" disabled={!isAdmin} onClick={() => deletePlaybook(pb)}>
+                            Удалить
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </div>
 
@@ -1935,114 +1983,118 @@ function AutomationPage() {
         </div>
         {approvals.length === 0 && <p>Запросов на approval пока нет</p>}
         {loading && approvals.length === 0 && (
-          <table className="hosts-table">
-            <thead>
-              <tr>
-                <th>ID</th>
-                <th>Run</th>
-                <th>Плейбук</th>
-                <th>Цели</th>
-                <th>Статус</th>
-                <th>Причина</th>
-                <th>Параметры</th>
-                <th>Действия</th>
-              </tr>
-            </thead>
-            <tbody>
-              {Array.from({ length: 3 }).map((_, idx) => (
-                <tr key={`skeleton-approval-${idx}`}>
-                  <td><span className="skeleton-line small" /></td>
-                  <td><span className="skeleton-line small" /></td>
-                  <td><span className="skeleton-line" /></td>
-                  <td><span className="skeleton-line small" /></td>
-                  <td><span className="skeleton-line small" /></td>
-                  <td><span className="skeleton-line" /></td>
-                  <td><span className="skeleton-line" /></td>
-                  <td><span className="skeleton-line" /></td>
+          <div className="table-scroll">
+            <table className="hosts-table">
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Run</th>
+                  <th>Плейбук</th>
+                  <th>Цели</th>
+                  <th>Статус</th>
+                  <th>Причина</th>
+                  <th>Параметры</th>
+                  <th>Действия</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {Array.from({ length: 3 }).map((_, idx) => (
+                  <tr key={`skeleton-approval-${idx}`}>
+                    <td><span className="skeleton-line small" /></td>
+                    <td><span className="skeleton-line small" /></td>
+                    <td><span className="skeleton-line" /></td>
+                    <td><span className="skeleton-line small" /></td>
+                    <td><span className="skeleton-line small" /></td>
+                    <td><span className="skeleton-line" /></td>
+                    <td><span className="skeleton-line" /></td>
+                    <td><span className="skeleton-line" /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
         {approvals.length > 0 && (
-          <table className="hosts-table">
-            <thead>
-              <tr>
-                <th>ID</th>
-                <th>Run</th>
-                <th>Плейбук</th>
-                <th>Цели</th>
-                <th>Статус</th>
-                <th>Причина</th>
-                <th>Параметры</th>
-                <th>Действия</th>
-              </tr>
-            </thead>
-            <tbody>
-              {approvals.map((approval) => {
-                const run = runs.find((item) => item.id === approval.run_id);
-                const playbookName = run ? playbookById.get(run.playbook_id)?.name ?? `#${run.playbook_id}` : "—";
-                const decisionDisabled = !isAdmin || approval.status !== "pending";
-                const diff = getRunParamsDiff(run);
-                const diffCounts = getDiffCounts(diff);
-                return (
-                  <tr key={approval.id}>
-                    <td>{approval.id}</td>
-                    <td>{approval.run_id}</td>
-                    <td>{playbookName}</td>
-                    <td>{getApprovalTargets(run)}</td>
-                    <td>
-                      <span className={`status-pill ${approval.status}`}>{approval.status}</span>
-                    </td>
-                    <td>
-                      {approval.status === "pending" ? (
-                        <input
-                          value={approvalReasons[approval.id] ?? ""}
-                          onChange={(e) => setApprovalReasons((prev) => ({ ...prev, [approval.id]: e.target.value }))}
-                          placeholder="Комментарий"
-                          disabled={decisionDisabled}
-                        />
-                      ) : (
-                        approval.reason ?? "—"
-                      )}
-                    </td>
-                    <td>
-                      {hasParamDiff(diff) ? (
-                        <div className="diff-summary">
-                          <span className="diff-chip added">+{diffCounts.added}</span>
-                          <span className="diff-chip removed">-{diffCounts.removed}</span>
-                          <span className="diff-chip changed">~{diffCounts.changed}</span>
-                          <button type="button" className="ghost-button" onClick={() => openDiffModal(run!)}>
-                            Показать
+          <div className="table-scroll">
+            <table className="hosts-table">
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Run</th>
+                  <th>Плейбук</th>
+                  <th>Цели</th>
+                  <th>Статус</th>
+                  <th>Причина</th>
+                  <th>Параметры</th>
+                  <th>Действия</th>
+                </tr>
+              </thead>
+              <tbody>
+                {approvals.map((approval) => {
+                  const run = runs.find((item) => item.id === approval.run_id);
+                  const playbookName = run ? playbookById.get(run.playbook_id)?.name ?? `#${run.playbook_id}` : "—";
+                  const decisionDisabled = !isAdmin || approval.status !== "pending";
+                  const diff = getRunParamsDiff(run);
+                  const diffCounts = getDiffCounts(diff);
+                  return (
+                    <tr key={approval.id}>
+                      <td>{approval.id}</td>
+                      <td>{approval.run_id}</td>
+                      <td>{playbookName}</td>
+                      <td>{getApprovalTargets(run)}</td>
+                      <td>
+                        <span className={`status-pill ${approval.status}`}>{approval.status}</span>
+                      </td>
+                      <td>
+                        {approval.status === "pending" ? (
+                          <input
+                            value={approvalReasons[approval.id] ?? ""}
+                            onChange={(e) => setApprovalReasons((prev) => ({ ...prev, [approval.id]: e.target.value }))}
+                            placeholder="Комментарий"
+                            disabled={decisionDisabled}
+                          />
+                        ) : (
+                          approval.reason ?? "—"
+                        )}
+                      </td>
+                      <td>
+                        {hasParamDiff(diff) ? (
+                          <div className="diff-summary">
+                            <span className="diff-chip added">+{diffCounts.added}</span>
+                            <span className="diff-chip removed">-{diffCounts.removed}</span>
+                            <span className="diff-chip changed">~{diffCounts.changed}</span>
+                            <button type="button" className="ghost-button" onClick={() => openDiffModal(run!)}>
+                              Показать
+                            </button>
+                          </div>
+                        ) : "—"}
+                      </td>
+                      <td>
+                        <div className="row-actions">
+                          <button
+                            type="button"
+                            className="ghost-button"
+                            onClick={() => decideApproval(approval, "approved")}
+                            disabled={decisionDisabled}
+                          >
+                            Approve
+                          </button>
+                          <button
+                            type="button"
+                            className="ghost-button"
+                            onClick={() => decideApproval(approval, "rejected")}
+                            disabled={decisionDisabled}
+                          >
+                            Reject
                           </button>
                         </div>
-                      ) : "—"}
-                    </td>
-                    <td>
-                      <div className="row-actions">
-                        <button
-                          type="button"
-                          className="ghost-button"
-                          onClick={() => decideApproval(approval, "approved")}
-                          disabled={decisionDisabled}
-                        >
-                          Approve
-                        </button>
-                        <button
-                          type="button"
-                          className="ghost-button"
-                          onClick={() => decideApproval(approval, "rejected")}
-                          disabled={decisionDisabled}
-                        >
-                          Reject
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
 
@@ -2053,84 +2105,88 @@ function AutomationPage() {
         </div>
         {runs.length === 0 && <p>Запусков пока нет</p>}
         {loading && runs.length === 0 && (
-          <table className="hosts-table">
-            <thead>
-              <tr>
-                <th>ID</th>
-                <th>Плейбук</th>
-                <th>Commit</th>
-                <th>Статус</th>
-                <th>Источник</th>
-                <th>Время</th>
-                <th>Действия</th>
-              </tr>
-            </thead>
-            <tbody>
-              {Array.from({ length: 4 }).map((_, idx) => (
-                <tr key={`skeleton-run-${idx}`}>
-                  <td><span className="skeleton-line small" /></td>
-                  <td><span className="skeleton-line" /></td>
-                  <td><span className="skeleton-line small" /></td>
-                  <td><span className="skeleton-line small" /></td>
-                  <td><span className="skeleton-line" /></td>
-                  <td><span className="skeleton-line small" /></td>
-                  <td><span className="skeleton-line" /></td>
+          <div className="table-scroll">
+            <table className="hosts-table">
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Плейбук</th>
+                  <th>Commit</th>
+                  <th>Статус</th>
+                  <th>Источник</th>
+                  <th>Время</th>
+                  <th>Действия</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {Array.from({ length: 4 }).map((_, idx) => (
+                  <tr key={`skeleton-run-${idx}`}>
+                    <td><span className="skeleton-line small" /></td>
+                    <td><span className="skeleton-line" /></td>
+                    <td><span className="skeleton-line small" /></td>
+                    <td><span className="skeleton-line small" /></td>
+                    <td><span className="skeleton-line" /></td>
+                    <td><span className="skeleton-line small" /></td>
+                    <td><span className="skeleton-line" /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
         {runs.length > 0 && (
-          <table className="hosts-table">
-            <thead>
-              <tr>
-                <th>ID</th>
-                <th>Плейбук</th>
-                <th>Commit</th>
-                <th>Статус</th>
-                <th>Источник</th>
-                <th>Время</th>
-                <th>Действия</th>
-              </tr>
-            </thead>
-            <tbody>
-              {runs.map((r) => (
-                <tr key={r.id}>
-                  <td>{r.id}</td>
-                  <td>{playbookById.get(r.playbook_id)?.name ?? `#${r.playbook_id}`}</td>
-                  <td>
-                    {(() => {
-                      const commit = getRepoCommitFull(r);
-                      const repoUrl = playbookById.get(r.playbook_id)?.repo_url;
-                      const link = buildCommitUrl(repoUrl, commit);
-                      if (commit && link) {
-                        return (
-                          <a href={link} target="_blank" rel="noreferrer">
-                            {commit.slice(0, 8)}
-                          </a>
-                        );
-                      }
-                      return getRepoCommit(r);
-                    })()}
-                  </td>
-                  <td>
-                    <span className={`status-pill ${r.status}`}>
-                      {getApprovalStatus(r) === "pending" ? "pending (approval)" : r.status}
-                    </span>
-                  </td>
-                  <td>{r.triggered_by}</td>
-                  <td>{r.started_at ? "запущен" : "в очереди"}</td>
-                  <td>
-                    <div className="row-actions">
-                      <button type="button" className="ghost-button" onClick={() => openLogs(r)}>
-                        Логи
-                      </button>
-                    </div>
-                  </td>
+          <div className="table-scroll">
+            <table className="hosts-table">
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Плейбук</th>
+                  <th>Commit</th>
+                  <th>Статус</th>
+                  <th>Источник</th>
+                  <th>Время</th>
+                  <th>Действия</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {runs.map((r) => (
+                  <tr key={r.id}>
+                    <td>{r.id}</td>
+                    <td>{playbookById.get(r.playbook_id)?.name ?? `#${r.playbook_id}`}</td>
+                    <td>
+                      {(() => {
+                        const commit = getRepoCommitFull(r);
+                        const repoUrl = playbookById.get(r.playbook_id)?.repo_url;
+                        const link = buildCommitUrl(repoUrl, commit);
+                        if (commit && link) {
+                          return (
+                            <a href={link} target="_blank" rel="noreferrer">
+                              {commit.slice(0, 8)}
+                            </a>
+                          );
+                        }
+                        return getRepoCommit(r);
+                      })()}
+                    </td>
+                    <td>
+                      <span className={`status-pill ${r.status}`}>
+                        {getApprovalStatus(r) === "pending" ? "pending (approval)" : r.status}
+                      </span>
+                    </td>
+                    <td>{r.triggered_by}</td>
+                    <td>{r.started_at ? "запущен" : "в очереди"}</td>
+                    <td>
+                      <div className="row-actions">
+                        <button type="button" className="ghost-button" onClick={() => openLogs(r)}>
+                          Логи
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
       </>

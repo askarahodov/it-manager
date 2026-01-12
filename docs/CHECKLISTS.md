@@ -70,8 +70,8 @@
 
 ### Automation 2.0
 - [x] playbook templates (vars schema + defaults)
-- [ ] instances (values + binding)
-- [ ] auto-generated форма + валидация типов (string/enum/secret/use-only)
+- [x] instances (values + binding)
+- [x] auto-generated форма + валидация типов (string/enum/secret/use-only)
 - [ ] approval flow для prod (requester/approver + diff)
 - [ ] event triggers: host added/tag changed/secret rotated/webhook/api call
 

@@ -68,6 +68,7 @@ function SettingsPage() {
   const [projectsLoading, setProjectsLoading] = useState(false);
   const [newProjectName, setNewProjectName] = useState("");
   const [newProjectDescription, setNewProjectDescription] = useState("");
+  const [compactTables, setCompactTables] = useState<boolean>(() => localStorage.getItem("it_manager_compact_tables") === "1");
 
   const [accessUserId, setAccessUserId] = useState<number | null>(null);
   const [accessEnvRestricted, setAccessEnvRestricted] = useState(false);
@@ -93,6 +94,16 @@ function SettingsPage() {
   useEffect(() => {
     refresh().catch(() => undefined);
   }, [refresh]);
+
+  useEffect(() => {
+    if (compactTables) {
+      document.body.classList.add("compact-tables");
+      localStorage.setItem("it_manager_compact_tables", "1");
+    } else {
+      document.body.classList.remove("compact-tables");
+      localStorage.removeItem("it_manager_compact_tables");
+    }
+  }, [compactTables]);
 
   const loadUsers = async () => {
     if (!token || user?.role !== "admin") return;
@@ -425,17 +436,25 @@ function SettingsPage() {
       </header>
 
       <div className="grid">
-        <div className="panel">
-          <h2>Сессия</h2>
-          {status === "authenticated" && user ? (
-            <div className="stack">
-              <p>
-                Вы вошли как <strong>{user.email}</strong> ({user.role})
-              </p>
-              <button className="ghost-button" type="button" onClick={logout}>
-                Выйти
-              </button>
-            </div>
+          <div className="panel">
+            <h2>Сессия</h2>
+            {status === "authenticated" && user ? (
+              <div className="stack">
+                <p>
+                  Вы вошли как <strong>{user.email}</strong> ({user.role})
+                </p>
+                <label>
+                  Режим таблиц
+                  <select value={compactTables ? "compact" : "spacious"} onChange={(e) => setCompactTables(e.target.value === "compact")}>
+                    <option value="spacious">просторный</option>
+                    <option value="compact">компактный</option>
+                  </select>
+                  <span className="form-helper">Компактный режим уменьшает отступы и плотность таблиц.</span>
+                </label>
+                <button className="ghost-button" type="button" onClick={logout}>
+                  Выйти
+                </button>
+              </div>
           ) : (
             <>
               <p>Для работы с Hosts/Secrets требуется токен.</p>
@@ -486,7 +505,6 @@ function SettingsPage() {
                     onChange={(e) => {
                       const id = Number(e.target.value);
                       setProjectId(Number.isFinite(id) && id > 0 ? id : 1);
-                      window.location.reload();
                     }}
                   >
                     {projects.map((p) => (

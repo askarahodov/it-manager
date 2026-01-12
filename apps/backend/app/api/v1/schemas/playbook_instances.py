@@ -34,3 +34,8 @@ class PlaybookInstanceRead(PlaybookInstanceBase):
 
     model_config = ConfigDict(from_attributes=True)
 
+
+class PlaybookInstanceRunRequest(BaseModel):
+    playbook_id: int
+    dry_run: bool = False
+    extra_vars: dict[str, Any] = Field(default_factory=dict)

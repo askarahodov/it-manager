@@ -8,6 +8,12 @@ export function formatError(err: unknown): string {
     // backend может возвращать JSON со строкой detail; apiFetch сейчас отдаёт текст,
     // поэтому здесь максимально безопасно приводим к виду "HTTP 400: ..."
     const msg = err.details?.message || err.message || "Ошибка API";
+    if (err.details?.status === 403 && /проект/i.test(msg)) {
+      return "Нет доступа к проекту. Выберите другой проект.";
+    }
+    if (err.details?.status === 404 && /проект/i.test(msg)) {
+      return "Проект не найден. Выберите другой проект.";
+    }
     const rid = err.details?.requestId ? ` (request-id: ${err.details.requestId})` : "";
     return `HTTP ${err.details.status}: ${msg}${rid}`;
   }

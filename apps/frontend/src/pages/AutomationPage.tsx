@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { apiFetch } from "../lib/api";
 import { useAuth } from "../lib/auth";
@@ -63,6 +63,17 @@ type PlaybookTemplate = {
   created_at: string;
 };
 
+type PlaybookInstance = {
+  id: number;
+  name: string;
+  description?: string | null;
+  template_id: number;
+  values: Record<string, unknown>;
+  host_ids: number[];
+  group_ids: number[];
+  created_at: string;
+};
+
 const defaultPlaybookYaml = `---
 - name: demo
   hosts: all
@@ -84,6 +95,8 @@ function AutomationPage() {
   const [hosts, setHosts] = useState<Host[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
   const [templates, setTemplates] = useState<PlaybookTemplate[]>([]);
+  const [instances, setInstances] = useState<PlaybookInstance[]>([]);
+  const [instanceRunPlaybookIds, setInstanceRunPlaybookIds] = useState<Record<number, number | "">>({});
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -104,6 +117,14 @@ function AutomationPage() {
   const [tplDescription, setTplDescription] = useState("");
   const [tplSchema, setTplSchema] = useState<string>("{}");
   const [tplDefaults, setTplDefaults] = useState<string>("{}");
+
+  const [editInstanceId, setEditInstanceId] = useState<number | null>(null);
+  const [instName, setInstName] = useState("");
+  const [instDescription, setInstDescription] = useState("");
+  const [instTemplateId, setInstTemplateId] = useState<number | "">("");
+  const [instValues, setInstValues] = useState<string>("{}");
+  const [instHostIds, setInstHostIds] = useState<number[]>([]);
+  const [instGroupIds, setInstGroupIds] = useState<number[]>([]);
 
   const [runModal, setRunModal] = useState<{ open: boolean; playbook: Playbook | null }>({
     open: false,
@@ -176,23 +197,55 @@ function AutomationPage() {
 
   const templateJsonError = templateSchemaError || templateDefaultsError;
 
-  const refreshAll = async () => {
+  const instanceValuesError = useMemo(() => {
+    try {
+      JSON.parse(instValues || "{}");
+      return null;
+    } catch {
+      return "Некорректный JSON в values.";
+    }
+  }, [instValues]);
+
+  const selectedTemplate = useMemo(
+    () => templates.find((tpl) => tpl.id === Number(instTemplateId)),
+    [templates, instTemplateId]
+  );
+
+  const instValuesObject = useMemo(() => {
+    try {
+      return JSON.parse(instValues || "{}") as Record<string, unknown>;
+    } catch {
+      return null;
+    }
+  }, [instValues]);
+
+  const schemaProperties = useMemo(() => {
+    const schema = selectedTemplate?.vars_schema;
+    if (!schema || typeof schema !== "object") return null;
+    const props = (schema as Record<string, any>).properties;
+    if (!props || typeof props !== "object") return null;
+    return props as Record<string, any>;
+  }, [selectedTemplate]);
+
+  const refreshAll = useCallback(async () => {
     if (!token) return;
     setLoading(true);
     setError(null);
     try {
-      const [pb, rr, hh, gg, tt] = await Promise.all([
+      const [pb, rr, hh, gg, tt, ii] = await Promise.all([
         apiFetch<Playbook[]>("/api/v1/playbooks/", { token }),
         apiFetch<Run[]>("/api/v1/runs/", { token }),
         apiFetch<Host[]>("/api/v1/hosts/", { token }),
         apiFetch<Group[]>("/api/v1/groups/", { token }),
         apiFetch<PlaybookTemplate[]>("/api/v1/playbook-templates/", { token }),
+        apiFetch<PlaybookInstance[]>("/api/v1/playbook-instances/", { token }),
       ]);
       setPlaybooks(pb);
       setRuns(rr);
       setHosts(hh);
       setGroups(gg);
       setTemplates(tt);
+      setInstances(ii);
     } catch (err) {
       const msg = formatError(err);
       setError(msg);
@@ -200,13 +253,40 @@ function AutomationPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [token, pushToast]);
 
   useEffect(() => {
     if (!token) return;
     refreshAll().catch(() => undefined);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token]);
+  }, [token, refreshAll, logModal.open, pushToast]);
+
+  useEffect(() => {
+    if (!token) return;
+    const onProjectChange = () => {
+      if (logModal.open) {
+        eventSourceRef.current?.close();
+        setLogModal({ open: false, run: null });
+        setLiveLogs("");
+        pushToast({ title: "Проект изменён", description: "Live-лог остановлен", variant: "warning" });
+      }
+      refreshAll().catch(() => undefined);
+    };
+    window.addEventListener("itmgr:project-change", onProjectChange);
+    return () => window.removeEventListener("itmgr:project-change", onProjectChange);
+  }, [token, refreshAll, logModal.open, pushToast]);
+
+  useEffect(() => {
+    if (!playbooks.length || !instances.length) return;
+    setInstanceRunPlaybookIds((prev) => {
+      const next = { ...prev };
+      instances.forEach((inst) => {
+        if (!next[inst.id]) {
+          next[inst.id] = playbooks[0].id;
+        }
+      });
+      return next;
+    });
+  }, [instances, playbooks]);
 
   const resetPlaybookForm = () => {
     setEditPlaybookId(null);
@@ -228,6 +308,26 @@ function AutomationPage() {
     setTplDescription("");
     setTplSchema("{}");
     setTplDefaults("{}");
+  };
+
+  const resetInstanceForm = () => {
+    setEditInstanceId(null);
+    setInstName("");
+    setInstDescription("");
+    setInstTemplateId("");
+    setInstValues("{}");
+    setInstHostIds([]);
+    setInstGroupIds([]);
+  };
+
+  const startEditInstance = (inst: PlaybookInstance) => {
+    setEditInstanceId(inst.id);
+    setInstName(inst.name);
+    setInstDescription(inst.description ?? "");
+    setInstTemplateId(inst.template_id);
+    setInstValues(JSON.stringify(inst.values ?? {}, null, 2));
+    setInstHostIds(inst.host_ids ?? []);
+    setInstGroupIds(inst.group_ids ?? []);
   };
 
   const startEditTemplate = (tpl: PlaybookTemplate) => {
@@ -375,6 +475,100 @@ function AutomationPage() {
     } catch (err) {
       const msg = formatError(err);
       pushToast({ title: "Ошибка удаления шаблона", description: msg, variant: "error" });
+    }
+  };
+
+  const submitInstance = async (e: FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    if (!token) return;
+    if (!isAdmin) {
+      setError("Требуются права admin.");
+      return;
+    }
+    if (instanceValuesError) {
+      setError(instanceValuesError);
+      pushToast({ title: "Ошибка валидации", description: instanceValuesError, variant: "error" });
+      return;
+    }
+    if (!instTemplateId) {
+      const msg = "Нужно выбрать шаблон.";
+      setError(msg);
+      pushToast({ title: "Ошибка валидации", description: msg, variant: "error" });
+      return;
+    }
+    try {
+      const payload = {
+        name: instName,
+        description: instDescription || null,
+        template_id: Number(instTemplateId),
+        values: JSON.parse(instValues || "{}"),
+        host_ids: instHostIds,
+        group_ids: instGroupIds,
+      };
+      const url = editInstanceId ? `/api/v1/playbook-instances/${editInstanceId}` : "/api/v1/playbook-instances/";
+      const method = editInstanceId ? "PUT" : "POST";
+      const saved = await apiFetch<PlaybookInstance>(url, {
+        method,
+        token,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      setInstances((prev) => {
+        if (editInstanceId) {
+          return prev.map((i) => (i.id === saved.id ? saved : i));
+        }
+        return [...prev, saved].sort((a, b) => a.name.localeCompare(b.name));
+      });
+      resetInstanceForm();
+      pushToast({ title: editInstanceId ? "Инстанс обновлён" : "Инстанс создан", description: saved.name, variant: "success" });
+    } catch (err) {
+      const msg = formatError(err);
+      setError(msg);
+      pushToast({ title: "Ошибка сохранения инстанса", description: msg, variant: "error" });
+    }
+  };
+
+  const deleteInstance = async (inst: PlaybookInstance) => {
+    if (!token || !isAdmin) return;
+    const ok = await confirm({
+      title: "Удалить инстанс?",
+      description: `Будет удалён инстанс "${inst.name}".`,
+      confirmText: "Удалить",
+      cancelText: "Отмена",
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      await apiFetch<void>(`/api/v1/playbook-instances/${inst.id}`, { method: "DELETE", token });
+      setInstances((prev) => prev.filter((i) => i.id !== inst.id));
+      pushToast({ title: "Инстанс удалён", description: inst.name, variant: "success" });
+    } catch (err) {
+      const msg = formatError(err);
+      pushToast({ title: "Ошибка удаления инстанса", description: msg, variant: "error" });
+    }
+  };
+
+  const runInstance = async (inst: PlaybookInstance) => {
+    if (!token) return;
+    const playbookId = instanceRunPlaybookIds[inst.id];
+    if (!playbookId) {
+      pushToast({ title: "Выберите плейбук", description: "Для запуска инстанса нужен плейбук.", variant: "warning" });
+      return;
+    }
+    try {
+      const payload = { playbook_id: Number(playbookId), dry_run: false, extra_vars: {} };
+      const resp = await apiFetch<{ run_id: number }>(`/api/v1/playbook-instances/${inst.id}/run`, {
+        method: "POST",
+        token,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      pushToast({ title: "Запуск создан", description: `run #${resp.run_id}`, variant: "success" });
+      refreshAll().catch(() => undefined);
+    } catch (err) {
+      const msg = formatError(err);
+      pushToast({ title: "Ошибка запуска инстанса", description: msg, variant: "error" });
     }
   };
 
@@ -536,6 +730,26 @@ function AutomationPage() {
             <p className="form-helper">Vars schema и defaults для будущих инстансов.</p>
           </div>
           {templates.length === 0 && <p>Шаблонов пока нет</p>}
+          {loading && templates.length === 0 && (
+            <table className="hosts-table">
+              <thead>
+                <tr>
+                  <th>Название</th>
+                  <th>Описание</th>
+                  <th>Действия</th>
+                </tr>
+              </thead>
+              <tbody>
+                {Array.from({ length: 4 }).map((_, idx) => (
+                  <tr key={`skeleton-template-${idx}`}>
+                    <td><span className="skeleton-line" /></td>
+                    <td><span className="skeleton-line" /></td>
+                    <td><span className="skeleton-line" /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
           {templates.length > 0 && (
             <table className="hosts-table">
               <thead>
@@ -599,6 +813,252 @@ function AutomationPage() {
                 Сброс
               </button>
             </div>
+            {error && <span className="text-error form-error">{error}</span>}
+          </form>
+        </div>
+      </div>
+
+      <div className="grid">
+        <div className="panel">
+          <div className="panel-title">
+            <h2>Инстансы плейбуков</h2>
+            <p className="form-helper">Значения шаблонов + привязка целей.</p>
+          </div>
+          {instances.length === 0 && <p>Инстансов пока нет</p>}
+          {loading && instances.length === 0 && (
+            <table className="hosts-table">
+              <thead>
+                <tr>
+                  <th>Название</th>
+                  <th>Шаблон</th>
+                  <th>Цели</th>
+                  <th>Действия</th>
+                </tr>
+              </thead>
+              <tbody>
+                {Array.from({ length: 4 }).map((_, idx) => (
+                  <tr key={`skeleton-instance-${idx}`}>
+                    <td><span className="skeleton-line" /></td>
+                    <td><span className="skeleton-line" /></td>
+                    <td><span className="skeleton-line small" /></td>
+                    <td><span className="skeleton-line" /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+          {instances.length > 0 && (
+            <table className="hosts-table">
+              <thead>
+                <tr>
+                  <th>Название</th>
+                  <th>Шаблон</th>
+                  <th>Цели</th>
+                  <th>Действия</th>
+                </tr>
+              </thead>
+              <tbody>
+                {instances.map((inst) => {
+                  const templateName = templates.find((t) => t.id === inst.template_id)?.name ?? `#${inst.template_id}`;
+                  return (
+                    <tr key={inst.id}>
+                      <td>{inst.name}</td>
+                      <td>{templateName}</td>
+                      <td>{(inst.host_ids?.length ?? 0) + (inst.group_ids?.length ?? 0)}</td>
+                      <td>
+                        <div className="row-actions">
+                          <select
+                            value={String(instanceRunPlaybookIds[inst.id] ?? "")}
+                            onChange={(e) =>
+                              setInstanceRunPlaybookIds((prev) => ({ ...prev, [inst.id]: e.target.value ? Number(e.target.value) : "" }))
+                            }
+                            title="Плейбук для запуска"
+                          >
+                            <option value="">плейбук…</option>
+                            {playbooks.map((pb) => (
+                              <option key={pb.id} value={pb.id}>
+                                {pb.name}
+                              </option>
+                            ))}
+                          </select>
+                          <button type="button" className="ghost-button" onClick={() => startEditInstance(inst)} disabled={!isAdmin}>
+                            Редактировать
+                          </button>
+                          <button
+                            type="button"
+                            className="ghost-button"
+                            onClick={() => runInstance(inst)}
+                            disabled={!canRun || !instanceRunPlaybookIds[inst.id]}
+                          >
+                            Запуск
+                          </button>
+                          <button type="button" className="ghost-button" onClick={() => deleteInstance(inst)} disabled={!isAdmin}>
+                            Удалить
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+
+        <div className="panel">
+          <div className="panel-title">
+            <h2>{editInstanceId ? "Редактировать инстанс" : "Создать инстанс"}</h2>
+            {!isAdmin && <p className="form-helper">Создание/редактирование доступно только admin.</p>}
+          </div>
+          <form className="form-stack" onSubmit={submitInstance}>
+            <label>
+              Название
+              <input value={instName} onChange={(e) => setInstName(e.target.value)} required minLength={3} disabled={!isAdmin} />
+            </label>
+            <label>
+              Шаблон
+              <select
+                value={String(instTemplateId)}
+                onChange={(e) => setInstTemplateId(e.target.value ? Number(e.target.value) : "")}
+                disabled={!isAdmin}
+              >
+                <option value="">—</option>
+                {templates.map((tpl) => (
+                  <option key={tpl.id} value={tpl.id}>
+                    {tpl.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Описание
+              <input value={instDescription} onChange={(e) => setInstDescription(e.target.value)} placeholder="Опционально" disabled={!isAdmin} />
+            </label>
+            <label>
+              Values (JSON)
+              {schemaProperties && instValuesObject && !instanceValuesError ? (
+                <div className="stack">
+                  {Object.entries(schemaProperties).map(([key, schema]) => {
+                    const field = (schema || {}) as Record<string, any>;
+                    const value = instValuesObject[key];
+                    const enumValues = Array.isArray(field.enum) ? field.enum.map(String) : null;
+                    const type = String(field.type || "string");
+                    const onValueChange = (nextValue: unknown) => {
+                      const updated = { ...instValuesObject, [key]: nextValue };
+                      setInstValues(JSON.stringify(updated, null, 2));
+                    };
+                    if (enumValues) {
+                      return (
+                        <label key={key}>
+                          {key}
+                          <select value={String(value ?? "")} onChange={(e) => onValueChange(e.target.value)} disabled={!isAdmin}>
+                            <option value="">—</option>
+                            {enumValues.map((opt) => (
+                              <option key={opt} value={opt}>
+                                {opt}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      );
+                    }
+                    if (type === "number" || type === "integer") {
+                      const numericValue =
+                        typeof value === "number"
+                          ? value
+                          : typeof value === "string" && value.trim() !== "" && !Number.isNaN(Number(value))
+                            ? Number(value)
+                            : "";
+                      return (
+                        <label key={key}>
+                          {key}
+                          <input
+                            type="number"
+                            value={numericValue}
+                            onChange={(e) => onValueChange(e.target.value === "" ? "" : Number(e.target.value))}
+                            disabled={!isAdmin}
+                          />
+                        </label>
+                      );
+                    }
+                    if (type === "boolean") {
+                      return (
+                        <label key={key}>
+                          {key}
+                          <select
+                            value={value === true ? "true" : value === false ? "false" : ""}
+                            onChange={(e) => onValueChange(e.target.value === "" ? "" : e.target.value === "true")}
+                            disabled={!isAdmin}
+                          >
+                            <option value="">—</option>
+                            <option value="true">true</option>
+                            <option value="false">false</option>
+                          </select>
+                        </label>
+                      );
+                    }
+                    return (
+                      <label key={key}>
+                        {key}
+                        <input
+                          value={typeof value === "string" || typeof value === "number" ? value : value == null ? "" : String(value)}
+                          onChange={(e) => onValueChange(e.target.value)}
+                          disabled={!isAdmin}
+                        />
+                      </label>
+                    );
+                  })}
+                  <span className="form-helper">Значения синхронизируются с JSON ниже.</span>
+                </div>
+              ) : (
+                <textarea value={instValues} onChange={(e) => setInstValues(e.target.value)} rows={6} style={{ resize: "vertical" }} disabled={!isAdmin} />
+              )}
+              {instanceValuesError && <span className="text-error">{instanceValuesError}</span>}
+              {schemaProperties && instValuesObject && !instanceValuesError && (
+                <textarea value={instValues} onChange={(e) => setInstValues(e.target.value)} rows={6} style={{ resize: "vertical" }} disabled={!isAdmin} />
+              )}
+            </label>
+            <label>
+              Цели: хосты
+              <select
+                multiple
+                value={instHostIds.map(String)}
+                onChange={(e) => setInstHostIds(Array.from(e.target.selectedOptions).map((o) => Number(o.value)))}
+                style={{ minHeight: 140 }}
+                disabled={!isAdmin}
+              >
+                {hosts.map((h) => (
+                  <option key={h.id} value={h.id}>
+                    {h.name} ({h.hostname}) [{h.environment}/{h.os_type}]
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Цели: группы
+              <select
+                multiple
+                value={instGroupIds.map(String)}
+                onChange={(e) => setInstGroupIds(Array.from(e.target.selectedOptions).map((o) => Number(o.value)))}
+                style={{ minHeight: 100 }}
+                disabled={!isAdmin}
+              >
+                {groups.map((g) => (
+                  <option key={g.id} value={g.id}>
+                    {g.name} ({g.type})
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="form-actions">
+              <button type="submit" className="primary-button" disabled={!isAdmin || Boolean(instanceValuesError)}>
+                Сохранить
+              </button>
+              <button type="button" className="ghost-button" onClick={resetInstanceForm}>
+                Сброс
+              </button>
+            </div>
+            {error && <span className="text-error form-error">{error}</span>}
           </form>
         </div>
       </div>
@@ -610,6 +1070,28 @@ function AutomationPage() {
             <p className="form-helper">MVP: хранение как YAML (stored_content).</p>
           </div>
           {playbooks.length === 0 && <p>Плейбуков пока нет</p>}
+          {loading && playbooks.length === 0 && (
+            <table className="hosts-table">
+              <thead>
+                <tr>
+                  <th>Название</th>
+                  <th>Описание</th>
+                  <th>Запуски</th>
+                  <th>Действия</th>
+                </tr>
+              </thead>
+              <tbody>
+                {Array.from({ length: 4 }).map((_, idx) => (
+                  <tr key={`skeleton-playbook-${idx}`}>
+                    <td><span className="skeleton-line" /></td>
+                    <td><span className="skeleton-line" /></td>
+                    <td><span className="skeleton-line small" /></td>
+                    <td><span className="skeleton-line" /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
           {playbooks.length > 0 && (
             <table className="hosts-table">
               <thead>
@@ -752,6 +1234,7 @@ function AutomationPage() {
                 Сброс
               </button>
             </div>
+            {error && <span className="text-error form-error">{error}</span>}
           </form>
         </div>
       </div>
@@ -762,6 +1245,32 @@ function AutomationPage() {
           <p className="form-helper">Live-лог: SSE `/runs/:id/stream`.</p>
         </div>
         {runs.length === 0 && <p>Запусков пока нет</p>}
+        {loading && runs.length === 0 && (
+          <table className="hosts-table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Плейбук</th>
+                <th>Статус</th>
+                <th>Источник</th>
+                <th>Время</th>
+                <th>Действия</th>
+              </tr>
+            </thead>
+            <tbody>
+              {Array.from({ length: 4 }).map((_, idx) => (
+                <tr key={`skeleton-run-${idx}`}>
+                  <td><span className="skeleton-line small" /></td>
+                  <td><span className="skeleton-line" /></td>
+                  <td><span className="skeleton-line small" /></td>
+                  <td><span className="skeleton-line" /></td>
+                  <td><span className="skeleton-line small" /></td>
+                  <td><span className="skeleton-line" /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
         {runs.length > 0 && (
           <table className="hosts-table">
             <thead>

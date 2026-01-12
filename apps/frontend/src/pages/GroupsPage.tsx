@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
 import { apiFetch } from "../lib/api";
 import { useAuth } from "../lib/auth";
@@ -85,7 +85,7 @@ function GroupsPage() {
     []
   );
 
-  const loadAll = async () => {
+  const loadAll = useCallback(async () => {
     if (!token) return;
     setLoading(true);
     setError(null);
@@ -103,13 +103,21 @@ function GroupsPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [token, pushToast]);
 
   useEffect(() => {
     if (!token) return;
     loadAll().catch(() => undefined);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token]);
+  }, [token, loadAll]);
+
+  useEffect(() => {
+    if (!token) return;
+    const onProjectChange = () => {
+      loadAll().catch(() => undefined);
+    };
+    window.addEventListener("itmgr:project-change", onProjectChange);
+    return () => window.removeEventListener("itmgr:project-change", onProjectChange);
+  }, [token, loadAll]);
 
   const loadGroupHosts = async (groupId: number): Promise<Host[]> => {
     if (!token) return [];

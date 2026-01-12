@@ -1,4 +1,4 @@
-import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react";
+import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
 import TerminalPane from "../components/TerminalPane";
 import { apiFetch } from "../lib/api";
@@ -89,7 +89,7 @@ function HostDetailsPage({ hostId }: { hostId: number }) {
     });
   };
 
-  const load = async () => {
+  const load = useCallback(async () => {
     if (!token) return;
     setLoading(true);
     setError(null);
@@ -108,12 +108,20 @@ function HostDetailsPage({ hostId }: { hostId: number }) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [token, hostId, pushToast]);
 
   useEffect(() => {
     load().catch(() => undefined);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token, hostId]);
+  }, [load]);
+
+  useEffect(() => {
+    if (!token) return;
+    const onProjectChange = () => {
+      load().catch(() => undefined);
+    };
+    window.addEventListener("itmgr:project-change", onProjectChange);
+    return () => window.removeEventListener("itmgr:project-change", onProjectChange);
+  }, [token, load]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -356,6 +364,7 @@ function HostDetailsPage({ hostId }: { hostId: number }) {
                     Сброс
                   </button>
                 </div>
+                {error && <span className="text-error form-error">{error}</span>}
               </form>
             )}
           </div>

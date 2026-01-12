@@ -69,8 +69,8 @@
 
 ## Фаза 11: Automation 2.0
 - [x] playbook templates (vars schema + defaults)
-- [ ] instances (values + binding hosts/groups)
-- [ ] auto-generated форма с валидацией типов (string/enum/secret/use-only)
+- [x] instances (values + binding hosts/groups)
+- [x] auto-generated форма с валидацией типов (string/enum/secret/use-only)
 - [ ] approval flow для prod (requester/approver + история + diff параметров)
 - [ ] event-driven triggers (host added/tag changed/secret rotated/webhook/api call)
 

@@ -44,11 +44,11 @@ function TerminalPane({ hostId, token, disabled, height = 360 }: Props) {
     };
   }, []);
 
-  const disconnect = () => {
+  const disconnect = useCallback(() => {
     socketRef.current?.close();
     socketRef.current = null;
     setConnStatus("disconnected");
-  };
+  }, []);
 
   const sendResize = useCallback(() => {
     const term = termRef.current;
@@ -103,7 +103,16 @@ function TerminalPane({ hostId, token, disabled, height = 360 }: Props) {
     return () => {
       ws.close();
     };
-  }, [hostId, token, disabled, sendResize]);
+  }, [hostId, token, disabled, sendResize, disconnect]);
+
+  useEffect(() => {
+    const onProjectChange = () => {
+      setError("Проект изменён. Переподключитесь к терминалу.");
+      disconnect();
+    };
+    window.addEventListener("itmgr:project-change", onProjectChange);
+    return () => window.removeEventListener("itmgr:project-change", onProjectChange);
+  }, [disconnect]);
 
   useEffect(() => {
     if (connStatus !== "connected") return;

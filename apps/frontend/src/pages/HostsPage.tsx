@@ -1,4 +1,4 @@
-import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react";
+import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
 import { apiFetch } from "../lib/api";
 import { useAuth } from "../lib/auth";
@@ -105,7 +105,7 @@ function HostsPage() {
     [secrets]
   );
 
-  const loadHosts = async (abortSignal?: AbortSignal) => {
+  const loadHosts = useCallback(async (abortSignal?: AbortSignal) => {
     if (!token) return;
     const params = new URLSearchParams();
     if (search.trim()) params.set("search", search.trim());
@@ -132,7 +132,7 @@ function HostsPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [token, search, statusFilter, envFilter, osFilter, tagKey, tagValue, sortBy, sortDir, limit, offset, pushToast]);
 
   useEffect(() => {
     setOffset(0);
@@ -148,8 +148,16 @@ function HostsPage() {
       controller.abort();
       window.clearTimeout(t);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token, search, statusFilter, envFilter, osFilter, tagKey, tagValue, sortBy, sortDir, limit, offset]);
+  }, [token, loadHosts]);
+
+  useEffect(() => {
+    if (!token) return;
+    const onProjectChange = () => {
+      loadHosts().catch(() => undefined);
+    };
+    window.addEventListener("itmgr:project-change", onProjectChange);
+    return () => window.removeEventListener("itmgr:project-change", onProjectChange);
+  }, [token, loadHosts]);
 
   useEffect(() => {
     if (!token) return;
@@ -422,6 +430,36 @@ function HostsPage() {
           {error && <p className="text-error">{error}</p>}
           {!loading && token && hosts.length === 0 && <p>Хосты отсутствуют</p>}
           {!loading && !token && <p className="text-error">Нет токена — войдите в Settings.</p>}
+          {loading && hosts.length === 0 && (
+            <div className="table-scroll" style={{ maxHeight: "clamp(320px, 55vh, 720px)" }}>
+              <table className="hosts-table">
+                <thead>
+                  <tr>
+                    <th>Название</th>
+                    <th>Hostname/IP</th>
+                    <th>ОС</th>
+                    <th>Пользователь</th>
+                    <th>Среда</th>
+                    <th>Статус</th>
+                    <th>Действие</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {Array.from({ length: 6 }).map((_, idx) => (
+                    <tr key={`skeleton-host-${idx}`}>
+                      <td><span className="skeleton-line" /></td>
+                      <td><span className="skeleton-line" /></td>
+                      <td><span className="skeleton-line small" /></td>
+                      <td><span className="skeleton-line" /></td>
+                      <td><span className="skeleton-line small" /></td>
+                      <td><span className="skeleton-line small" /></td>
+                      <td><span className="skeleton-line" /></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
           {hosts.length > 0 && (
             <div className="table-scroll" style={{ maxHeight: "clamp(320px, 55vh, 720px)" }}>
               <table className="hosts-table">
@@ -607,6 +645,7 @@ function HostsPage() {
                 </button>
               )}
             </div>
+            {error && <span className="text-error form-error">{error}</span>}
           </form>
           <p className="form-helper">
             Изменения отправляются на backend; для действительных ответов предварительно выполните `POST /api/v1/auth/login`.

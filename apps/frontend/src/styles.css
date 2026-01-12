@@ -350,7 +350,12 @@ body {
 .form-helper {
   margin-top: 0.75rem;
   font-size: 0.8rem;
-  color: #94a3b8;
+  color: #b6c2d6;
+}
+
+.form-error {
+  margin-top: 0.35rem;
+  font-size: 0.85rem;
 }
 
 .row-actions {
@@ -390,6 +395,25 @@ body {
 
 .hosts-table td {
   word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.hosts-table td .truncate {
+  display: inline-block;
+  max-width: 22ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.compact-tables .hosts-table th,
+.compact-tables .hosts-table td {
+  padding: 0.4rem 0.5rem;
+  font-size: 0.82rem;
+}
+
+.compact-tables .row-actions {
+  gap: 0.35rem;
 }
 
 .hosts-table th {
@@ -413,6 +437,29 @@ body {
   top: 0;
   background: #111827;
   z-index: 1;
+}
+
+.skeleton-line {
+  display: block;
+  height: 12px;
+  border-radius: 6px;
+  background: linear-gradient(90deg, rgba(148, 163, 184, 0.12), rgba(148, 163, 184, 0.35), rgba(148, 163, 184, 0.12));
+  background-size: 200% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+
+.skeleton-line.small {
+  height: 8px;
+  border-radius: 4px;
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
 }
 
 .hosts-table th[aria-sort] {
@@ -609,6 +656,30 @@ body {
 }
 
 @media (max-width: 900px) {
+  .top-bar {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+
+  .top-left {
+    flex-wrap: wrap;
+    width: 100%;
+  }
+
+  .top-project {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .top-project .select {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .top-user {
+    width: 100%;
+  }
+
   .sidebar {
     position: fixed;
     inset: 0 auto 0 0;

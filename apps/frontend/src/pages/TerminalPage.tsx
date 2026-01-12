@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import TerminalPane from "../components/TerminalPane";
 import { apiFetch } from "../lib/api";
@@ -42,7 +42,7 @@ function TerminalPage() {
     };
   }, []);
 
-  useEffect(() => {
+  const loadHost = useCallback(() => {
     if (!token || !hostId) return;
     setLoading(true);
     setError(null);
@@ -55,6 +55,19 @@ function TerminalPage() {
       })
       .finally(() => setLoading(false));
   }, [token, hostId, pushToast]);
+
+  useEffect(() => {
+    loadHost();
+  }, [loadHost]);
+
+  useEffect(() => {
+    if (!token) return;
+    const onProjectChange = () => {
+      loadHost();
+    };
+    window.addEventListener("itmgr:project-change", onProjectChange);
+    return () => window.removeEventListener("itmgr:project-change", onProjectChange);
+  }, [token, loadHost]);
 
   if (!hostId) {
     return (

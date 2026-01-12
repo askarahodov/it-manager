@@ -34,9 +34,10 @@ function TopBar({ sidebarOpen, onToggleSidebar }: Props) {
       .then((items) => {
         setProjects(items);
         setProjectsError(null);
-        // Если проект не выбран — установим default (чтобы всегда пробрасывать X-Project-Id).
+        // Если проект не выбран или недоступен — установим default (чтобы всегда пробрасывать X-Project-Id).
         const current = getProjectId();
-        if (!current) {
+        const hasCurrent = current ? items.some((p) => p.id === current) : false;
+        if (!current || !hasCurrent) {
           const id = pickDefaultProjectId(items);
           if (id) {
             setProjectId(id);
@@ -84,9 +85,6 @@ function TopBar({ sidebarOpen, onToggleSidebar }: Props) {
                 description: next ? `Текущий проект: ${projects.find((p) => p.id === next)?.name ?? next}` : "default",
                 variant: "success",
               });
-              // MVP: самый надёжный способ перезагрузить все страницы и запросы.
-              window.location.hash = "";
-              window.location.reload();
             }}
             disabled={!canSwitch}
             aria-label="Выбор проекта"
@@ -108,4 +106,3 @@ function TopBar({ sidebarOpen, onToggleSidebar }: Props) {
 }
 
 export default TopBar;
-

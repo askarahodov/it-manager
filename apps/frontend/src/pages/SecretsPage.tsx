@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
 import { apiFetch } from "../lib/api";
 import { useAuth } from "../lib/auth";
@@ -76,7 +76,7 @@ function SecretsPage() {
     return summary;
   }, [secrets]);
 
-  useEffect(() => {
+  const loadSecrets = useCallback(async () => {
     if (!token) return;
     setLoading(true);
     apiFetch<Secret[]>("/api/v1/secrets/", { token })
@@ -88,6 +88,19 @@ function SecretsPage() {
       })
       .finally(() => setLoading(false));
   }, [token, pushToast]);
+
+  useEffect(() => {
+    loadSecrets().catch(() => undefined);
+  }, [loadSecrets]);
+
+  useEffect(() => {
+    if (!token) return;
+    const onProjectChange = () => {
+      loadSecrets().catch(() => undefined);
+    };
+    window.addEventListener("itmgr:project-change", onProjectChange);
+    return () => window.removeEventListener("itmgr:project-change", onProjectChange);
+  }, [token, loadSecrets]);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -250,6 +263,30 @@ function SecretsPage() {
           </div>
           {loading && <p>Загружаем...</p>}
           {!loading && secrets.length === 0 && <p>Секретов пока нет</p>}
+          {loading && secrets.length === 0 && (
+            <div className="table-scroll">
+              <table className="hosts-table">
+                <thead>
+                  <tr>
+                    <th>Название</th>
+                    <th>Тип</th>
+                    <th>Scope</th>
+                    <th>Действия</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {Array.from({ length: 5 }).map((_, idx) => (
+                    <tr key={`skeleton-secret-${idx}`}>
+                      <td><span className="skeleton-line" /></td>
+                      <td><span className="skeleton-line small" /></td>
+                      <td><span className="skeleton-line small" /></td>
+                      <td><span className="skeleton-line" /></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
           {secrets.length > 0 && (
             <div className="table-scroll">
               <table className="hosts-table">
@@ -376,6 +413,7 @@ function SecretsPage() {
                 <input value={form.passphrase} onChange={(e) => setForm((prev) => ({ ...prev, passphrase: e.target.value }))} disabled={!isAdmin} />
               </label>
             )}
+            {error && <span className="text-error form-error">{error}</span>}
             <button className="primary-button" type="submit" disabled={!isAdmin}>
               {editId ? "Сохранить" : "Создать"}
             </button>

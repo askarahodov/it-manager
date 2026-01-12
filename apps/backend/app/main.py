@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.v1 import api_router
 from app.core.config import settings
+from app.core.audit_context import set_source_ip
 from app.core.logging import setup_logging
 from app.core.request_id import new_request_id, set_request_id
 from app.db import engine
@@ -59,12 +60,20 @@ async def request_id_middleware(request, call_next):
     - Возвращаем значение обратно в заголовке ответа `X-Request-Id`.
     """
     incoming = request.headers.get("x-request-id")
+    forwarded = request.headers.get("x-forwarded-for")
+    source_ip = None
+    if forwarded:
+        source_ip = forwarded.split(",")[0].strip() or None
+    if not source_ip:
+        source_ip = request.client.host if request.client else None
     rid = (incoming or "").strip() or new_request_id()
     set_request_id(rid)
+    set_source_ip(source_ip)
     try:
         response = await call_next(request)
     finally:
         set_request_id(None)
+        set_source_ip(None)
     response.headers["X-Request-Id"] = rid
     return response
 

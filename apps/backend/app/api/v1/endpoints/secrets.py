@@ -11,6 +11,7 @@ from app.core.rbac import Permission
 from app.db.models import Host, Secret
 from app.services.audit import audit_log
 from app.services.encryption import decrypt_value, encrypt_value
+from app.services.triggers import dispatch_secret_triggers
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -91,6 +92,15 @@ async def update_secret(
     if secret.project_id is not None and secret.project_id != project_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Секрет не найден")
 
+    should_trigger_rotation = payload.value is not None
+    before = {
+        "name": secret.name,
+        "type": secret.type,
+        "scope": secret.scope,
+        "description": secret.description,
+        "tags": secret.tags,
+        "expires_at": secret.expires_at.isoformat() if secret.expires_at else None,
+    }
     encrypted = encrypt_value(payload.value) if payload.value else secret.encrypted_value
     encrypted_passphrase = (
         encrypt_value(payload.passphrase) if payload.passphrase else secret.encrypted_passphrase
@@ -105,6 +115,14 @@ async def update_secret(
     secret.encrypted_passphrase = encrypted_passphrase
     await db.commit()
     await db.refresh(secret)
+    after = {
+        "name": secret.name,
+        "type": secret.type,
+        "scope": secret.scope,
+        "description": secret.description,
+        "tags": secret.tags,
+        "expires_at": secret.expires_at.isoformat() if secret.expires_at else None,
+    }
     await audit_log(
         db,
         project_id=project_id,
@@ -113,8 +131,10 @@ async def update_secret(
         action="secret.update",
         entity_type="secret",
         entity_id=secret.id,
-        meta={"name": secret.name, "type": secret.type, "scope": secret.scope},
+        meta={"name": secret.name, "type": secret.type, "scope": secret.scope, "before": before, "after": after},
     )
+    if should_trigger_rotation:
+        await dispatch_secret_triggers(db, secret, project_id)
     return secret
 
 

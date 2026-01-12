@@ -83,6 +83,7 @@ class Secret(Base):
     scope = Column(String, default="project")
     description = Column(Text, nullable=True)
     tags = Column(JSONB, default=dict)
+    expires_at = Column(DateTime, nullable=True)
     created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, onupdate=datetime.utcnow())
@@ -107,11 +108,26 @@ class Host(Base):
     last_run_id = Column(Integer, nullable=True)
     last_run_status = Column(String, nullable=True)
     last_run_at = Column(DateTime, nullable=True)
+    health_snapshot = Column(JSONB, nullable=True)
+    health_checked_at = Column(DateTime, nullable=True)
+    facts_snapshot = Column(JSONB, nullable=True)
+    facts_checked_at = Column(DateTime, nullable=True)
     credential_id = Column(Integer, ForeignKey("secrets.id"), nullable=True)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, onupdate=datetime.utcnow())
 
     credential = relationship("Secret", lazy="joined")
+
+
+class HostHealthCheck(Base):
+    __tablename__ = "host_health_checks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False, default=1, index=True)
+    host_id = Column(Integer, ForeignKey("hosts.id"), nullable=False, index=True)
+    status = Column(String, nullable=False)
+    snapshot = Column(JSONB, nullable=True)
+    checked_at = Column(DateTime, server_default=func.now())
 
 
 class GroupType(str, enum.Enum):
@@ -289,4 +305,5 @@ class AuditEvent(Base):
     entity_id = Column(Integer, nullable=True)
     success = Column(Integer, default=1, nullable=False)  # 1/0
     meta = Column(JSONB, default=dict)  # безопасные метаданные
+    source_ip = Column(String, nullable=True)
     created_at = Column(DateTime, server_default=func.now(), index=True)

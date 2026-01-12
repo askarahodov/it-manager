@@ -10,6 +10,7 @@ from typing import Any, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.audit_context import get_source_ip
 from app.db.models import AuditEvent
 
 logger = logging.getLogger(__name__)
@@ -26,6 +27,7 @@ async def audit_log(
     entity_id: int | None = None,
     success: bool = True,
     meta: Optional[dict[str, Any]] = None,
+    source_ip: str | None = None,
 ) -> None:
     """Пишет событие аудита.
 
@@ -42,6 +44,7 @@ async def audit_log(
             entity_id=entity_id,
             success=1 if success else 0,
             meta=meta or {},
+            source_ip=source_ip or get_source_ip(),
         )
         db.add(event)
         await db.commit()

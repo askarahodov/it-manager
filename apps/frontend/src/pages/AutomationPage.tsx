@@ -90,7 +90,7 @@ type PlaybookTrigger = {
   id: number;
   project_id: number;
   playbook_id: number;
-  type: "host_created" | "host_tags_changed";
+  type: "host_created" | "host_tags_changed" | "secret_rotated";
   enabled: boolean;
   filters: Record<string, unknown>;
   extra_vars: Record<string, unknown>;
@@ -157,7 +157,7 @@ function AutomationPage() {
 
   const [editTriggerId, setEditTriggerId] = useState<number | null>(null);
   const [triggerPlaybookId, setTriggerPlaybookId] = useState<number | "">("");
-  const [triggerType, setTriggerType] = useState<"host_created" | "host_tags_changed">("host_created");
+  const [triggerType, setTriggerType] = useState<"host_created" | "host_tags_changed" | "secret_rotated">("host_created");
   const [triggerEnabled, setTriggerEnabled] = useState(true);
   const [triggerFilters, setTriggerFilters] = useState<string>('{"environments":["prod"],"tags":{"role":"db"}}');
   const [triggerExtraVars, setTriggerExtraVars] = useState<string>("{}");
@@ -1468,9 +1468,14 @@ function AutomationPage() {
             </label>
             <label>
               Тип события
-              <select value={triggerType} onChange={(e) => setTriggerType(e.target.value as "host_created" | "host_tags_changed")} disabled={!isAdmin}>
+              <select
+                value={triggerType}
+                onChange={(e) => setTriggerType(e.target.value as "host_created" | "host_tags_changed" | "secret_rotated")}
+                disabled={!isAdmin}
+              >
                 <option value="host_created">host_created</option>
                 <option value="host_tags_changed">host_tags_changed</option>
+                <option value="secret_rotated">secret_rotated</option>
               </select>
             </label>
             <label>
@@ -1484,6 +1489,7 @@ function AutomationPage() {
               Filters (JSON)
               <textarea value={triggerFilters} onChange={(e) => setTriggerFilters(e.target.value)} rows={5} style={{ resize: "vertical" }} disabled={!isAdmin} />
               {triggerFiltersError && <span className="text-error">{triggerFiltersError}</span>}
+              <span className="form-helper">Примеры: {"{\"environments\":[\"prod\"],\"tags\":{\"role\":\"db\"}}"} или {"{\"types\":[\"password\"],\"scopes\":[\"project\"]}"}.</span>
             </label>
             <label>
               Extra vars (JSON)

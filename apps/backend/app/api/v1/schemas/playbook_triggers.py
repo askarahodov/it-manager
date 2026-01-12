@@ -6,7 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 class PlaybookTriggerBase(BaseModel):
     playbook_id: int
-    type: str = Field(..., description="host_created|host_tags_changed")
+    type: str = Field(..., description="host_created|host_tags_changed|secret_rotated")
     enabled: bool = True
     filters: dict[str, Any] = Field(default_factory=dict)
     extra_vars: dict[str, Any] = Field(default_factory=dict)

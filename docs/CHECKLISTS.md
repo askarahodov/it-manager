@@ -63,10 +63,10 @@
 - [x] unit/integration тесты на project scoping и project fallback
 
 ### Advanced Host Health
-- [ ] сбор метрик (uptime/load/disk/memory) + сохранение последнего статуса
-- [ ] упрощённая история (time-series) для health checks
+- [x] сбор метрик (uptime/load/disk/memory) + сохранение последнего статуса
+- [x] упрощённая история (time-series) для health checks
 - [x] last ansible run status на Host details
-- [ ] custom checks через ansible facts (MVP)
+- [x] custom checks через ansible facts (MVP)
 
 ### Automation 2.0
 - [x] playbook templates (vars schema + defaults)
@@ -76,7 +76,7 @@
 - [x] approval diff параметров (before/after по запуску)
 - [x] event triggers: webhook/api call
 - [x] event triggers: host added/tag changed
-- [ ] event triggers: secret rotated
+- [x] event triggers: secret rotated
 
 ### Secrets Enterprise
 - [ ] rotation policies (manual/scheduled) + интеграции (SSH password / API token)
@@ -90,8 +90,9 @@
 
 ### UI/UX
 - [ ] global search + Cmd/Ctrl+K quick actions
-- [ ] dashboard widgets (status/runs/schedules/secrets/ssh activity)
-- [ ] audit log UI: фильтры + экспорт + before/after + source/IP
+- [x] dashboard widgets (status/runs/schedules/ssh activity)
+- [x] dashboard widgets: expiring secrets
+- [x] audit log UI: фильтры + экспорт + before/after + source/IP
 
 ### Интеграции и Ops
 - [ ] git integration: auto-sync + commit hash в execution history

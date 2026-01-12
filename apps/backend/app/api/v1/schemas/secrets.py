@@ -22,6 +22,7 @@ class SecretBase(BaseModel):
     scope: SecretScope = SecretScope.project
     description: Optional[str] = None
     tags: Dict[str, str] = Field(default_factory=dict)
+    expires_at: Optional[datetime] = None
 
 
 class SecretCreate(SecretBase):

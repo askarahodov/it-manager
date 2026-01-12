@@ -470,6 +470,11 @@ async def _execute_run(
         for key_path, passphrase in inventory_text.agent_keys:
             await _ssh_add_key(env, key_path, passphrase)
 
+    facts_run = bool(targets.get("facts_run"))
+    facts_host_id = None
+    if facts_run and len(hosts) == 1:
+        facts_host_id = hosts[0].get("id")
+
     used_runner = False
     try:
         if ctx.use_ansible_runner:
@@ -487,6 +492,8 @@ async def _execute_run(
                 request_id=rid,
                 run_log_path=run_log_path,
                 project_id=project_id,
+                facts_run=facts_run,
+                facts_host_id=facts_host_id,
             )
     except Exception as exc:  # noqa: BLE001
         logger.exception("ansible-runner failed, fallback to ansible-playbook run_id=%s: %s", run_id, exc)
@@ -495,6 +502,16 @@ async def _execute_run(
     if used_runner:
         # статус и логи выставлены внутри runner.
         return True
+
+    if facts_run:
+        await _append_log(
+            client,
+            token,
+            run_id,
+            "==> facts: ansible-runner недоступен, факты не сохранены\n",
+            request_id=rid,
+            project_id=project_id,
+        )
 
     # Fallback: прямой запуск ansible-playbook (MVP)
     extra_vars_path = run_dir / "extra_vars.json"
@@ -623,6 +640,8 @@ async def _run_with_ansible_runner(
     request_id: str,
     run_log_path: Path,
     project_id: int,
+    facts_run: bool,
+    facts_host_id: int | None,
 ) -> bool:
     """Запуск плейбука через ansible-runner (с event stream).
 
@@ -649,7 +668,19 @@ async def _run_with_ansible_runner(
 
     out_q: "queue.Queue[str]" = queue.Queue()
 
+    facts_holder: list[dict[str, Any] | None] = [None]
+
     def event_handler(event: dict[str, Any]) -> None:
+        if not facts_run:
+            pass
+        elif event.get("event") == "runner_on_ok":
+            data = event.get("event_data") or {}
+            if data.get("task") == "Gathering Facts":
+                res = data.get("res") or {}
+                facts = res.get("ansible_facts")
+                if isinstance(facts, dict):
+                    facts_holder[0] = facts
+
         stdout = event.get("stdout")
         if not stdout:
             return
@@ -740,6 +771,16 @@ async def _run_with_ansible_runner(
         (run_dir / "runner.summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
     except Exception:
         pass
+
+    if facts_run and facts_host_id and facts_holder[0]:
+        await _backend_post(
+            client,
+            token,
+            f"/api/v1/hosts/{facts_host_id}/facts",
+            {"facts": facts_holder[0]},
+            request_id=request_id,
+            project_id=project_id,
+        )
 
     if not ctx.keep_sensitive_artifacts:
         # runner может сохранить артефакты, иногда содержащие входные данные; удаляем best-effort

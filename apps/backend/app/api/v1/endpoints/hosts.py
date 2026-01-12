@@ -11,17 +11,30 @@ from sqlalchemy import asc, desc, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.deps import get_current_project_id, get_db, require_permission
-from app.api.v1.schemas.hosts import HostCreate, HostRead, HostStatusCheckResponse, HostUpdate
+from app.api.v1.schemas.hosts import HostCreate, HostFactsUpdate, HostHealthHistoryRead, HostRead, HostStatusCheckResponse, HostUpdate
+from app.api.v1.schemas.runs import RunRead
 from app.core.rbac import Permission, has_permission
-from app.db.models import Host, HostCheckMethod, HostStatus, Secret, SecretType, User
+from app.db.models import Host, HostCheckMethod, HostHealthCheck, HostStatus, JobRun, JobStatus, Playbook, Secret, SecretType, User
 from app.services.access import apply_host_scope, host_access_clause
 from app.services.audit import audit_log
 from app.services.encryption import decrypt_value
 from app.services.projects import ProjectAccessDenied, ProjectNotFound, resolve_current_project_id
 from app.services.triggers import dispatch_host_triggers
+from app.services.queue import enqueue_run
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+FACTS_PLAYBOOK_NAME = "_system_facts"
+FACTS_PLAYBOOK_CONTENT = """---
+- name: collect facts
+  hosts: all
+  gather_facts: true
+  tasks:
+    - name: facts collected
+      debug:
+        msg: "facts ok"
+"""
 
 
 async def _probe_ping(host: Host) -> HostStatus:
@@ -57,23 +70,75 @@ async def _probe_tcp(host: Host) -> HostStatus:
         return HostStatus.offline
 
 
-async def _probe_ssh(host: Host) -> HostStatus:
-    """Проверка SSH connect (без interactive PTY). Требует credential для password/ключа."""
+def _get_ssh_credentials(host: Host) -> tuple[Optional[str], Optional[str], Optional[str]]:
     password: Optional[str] = None
     private_key: Optional[str] = None
     passphrase: Optional[str] = None
 
-    if host.credential:
+    if not host.credential:
+        return password, private_key, passphrase
+
+    decrypted = decrypt_value(host.credential.encrypted_value)
+    if host.credential.type == SecretType.password:
+        password = decrypted
+    elif host.credential.type == SecretType.private_key:
+        private_key = decrypted
+        if host.credential.encrypted_passphrase:
+            passphrase = decrypt_value(host.credential.encrypted_passphrase)
+    return password, private_key, passphrase
+
+
+def _parse_health_snapshot(output: str) -> dict[str, float | int]:
+    lines = [line.strip() for line in output.splitlines() if line.strip()]
+    snapshot: dict[str, float | int] = {}
+    if not lines:
+        return snapshot
+    try:
+        uptime_parts = lines[0].split()
+        snapshot["uptime_seconds"] = float(uptime_parts[0])
+    except Exception:
+        pass
+    if len(lines) > 1:
         try:
-            decrypted = decrypt_value(host.credential.encrypted_value)
-            if host.credential.type == SecretType.password:
-                password = decrypted
-            elif host.credential.type == SecretType.private_key:
-                private_key = decrypted
-                if host.credential.encrypted_passphrase:
-                    passphrase = decrypt_value(host.credential.encrypted_passphrase)
+            load_parts = lines[1].split()
+            snapshot["load1"] = float(load_parts[0])
+            snapshot["load5"] = float(load_parts[1])
+            snapshot["load15"] = float(load_parts[2])
         except Exception:
-            return HostStatus.offline
+            pass
+    mem_total = None
+    mem_available = None
+    for line in lines:
+        if line.startswith("MemTotal:"):
+            mem_total = int(line.split()[1])
+        if line.startswith("MemAvailable:"):
+            mem_available = int(line.split()[1])
+    if mem_total is not None:
+        snapshot["mem_total_kb"] = mem_total
+        if mem_available is not None:
+            snapshot["mem_used_kb"] = mem_total - mem_available
+    df_line = None
+    for line in lines:
+        parts = line.split()
+        if len(parts) >= 6 and parts[-1] == "/":
+            df_line = line
+            break
+    if df_line:
+        parts = df_line.split()
+        snapshot["disk_total_kb"] = int(parts[1])
+        snapshot["disk_used_kb"] = int(parts[2])
+        percent = parts[4].rstrip("%")
+        if percent.isdigit():
+            snapshot["disk_used_percent"] = int(percent)
+    return snapshot
+
+
+async def _probe_ssh_health(host: Host) -> tuple[HostStatus, Optional[dict[str, float | int]]]:
+    """Проверка SSH и сбор метрик (uptime/load/mem/disk)."""
+    try:
+        password, private_key, passphrase = _get_ssh_credentials(host)
+    except Exception:
+        return HostStatus.offline, None
 
     try:
         conn = await asyncssh.connect(
@@ -86,11 +151,24 @@ async def _probe_ssh(host: Host) -> HostStatus:
             known_hosts=None,
             server_host_key_algs=["ssh-ed25519", "ssh-rsa"],
         )
+    except Exception:
+        return HostStatus.offline, None
+
+    try:
+        result = await conn.run(
+            "cat /proc/uptime; cat /proc/loadavg; cat /proc/meminfo; df -kP /",
+            check=False,
+        )
         conn.close()
         await conn.wait_closed()
-        return HostStatus.online
     except Exception:
-        return HostStatus.offline
+        conn.close()
+        await conn.wait_closed()
+        return HostStatus.offline, None
+
+    if result.exit_status != 0:
+        return HostStatus.online, None
+    return HostStatus.online, _parse_health_snapshot(result.stdout or "")
 
 
 @router.get("/", response_model=list[HostRead])
@@ -206,6 +284,11 @@ async def update_host(
 
     updates = payload.model_dump(exclude_unset=True)
     previous_tags = dict(existing.tags or {})
+    before = {}
+    after = {}
+    for key, value in updates.items():
+        before[key] = getattr(existing, key, None)
+        after[key] = value
     if "credential_id" in updates and updates["credential_id"]:
         secret = await db.get(Secret, int(updates["credential_id"]))
         if not secret or (secret.project_id is not None and secret.project_id != project_id):
@@ -223,7 +306,7 @@ async def update_host(
         action="host.update",
         entity_type="host",
         entity_id=existing.id,
-        meta={"name": existing.name, "hostname": existing.hostname, "port": existing.port},
+        meta={"name": existing.name, "hostname": existing.hostname, "port": existing.port, "before": before, "after": after},
     )
     if updates.get("tags") is not None and dict(existing.tags or {}) != previous_tags:
         await dispatch_host_triggers(db, existing, "host_tags_changed")
@@ -273,16 +356,30 @@ async def check_status(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Хост не найден")
 
     method = host.check_method or HostCheckMethod.tcp
+    snapshot: Optional[dict[str, float | int]] = None
     if method == HostCheckMethod.ping:
         status_result = await _probe_ping(host)
     elif method == HostCheckMethod.ssh:
-        status_result = await _probe_ssh(host)
+        status_result, snapshot = await _probe_ssh_health(host)
+        if snapshot:
+            host.health_snapshot = snapshot
+            host.health_checked_at = datetime.utcnow()
     else:
         status_result = await _probe_tcp(host)
     host.status = status_result
     host.last_checked_at = datetime.utcnow()
     await db.commit()
     await db.refresh(host)
+    db.add(
+        HostHealthCheck(
+            project_id=project_id,
+            host_id=host.id,
+            status=str(status_result.value if hasattr(status_result, "value") else status_result),
+            snapshot=snapshot,
+            checked_at=host.last_checked_at,
+        )
+    )
+    await db.commit()
     await audit_log(
         db,
         project_id=project_id,
@@ -294,6 +391,146 @@ async def check_status(
         meta={"status": host.status, "method": str(method.value)},
     )
     return host
+
+
+@router.post("/{host_id}/facts-refresh", response_model=RunRead, status_code=status.HTTP_201_CREATED)
+async def refresh_facts(
+    host_id: int,
+    db: AsyncSession = Depends(get_db),
+    principal=Depends(require_permission(Permission.ansible_run)),
+    project_id: int = Depends(get_current_project_id),
+):
+    res = await db.execute(
+        select(Host)
+        .where(Host.id == host_id)
+        .where(Host.project_id == project_id)
+        .where(host_access_clause(principal))
+    )
+    host = res.scalar_one_or_none()
+    if not host:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Хост не найден")
+
+    query = await db.execute(
+        select(Playbook).where(Playbook.project_id == project_id).where(Playbook.name == FACTS_PLAYBOOK_NAME)
+    )
+    playbook = query.scalar_one_or_none()
+    if not playbook:
+        playbook = Playbook(
+            project_id=project_id,
+            name=FACTS_PLAYBOOK_NAME,
+            description="System playbook: facts collection",
+            stored_content=FACTS_PLAYBOOK_CONTENT,
+            variables={},
+            inventory_scope=[],
+            created_by=principal.id,
+        )
+        db.add(playbook)
+        await db.commit()
+        await db.refresh(playbook)
+
+    snapshot_hosts = [
+        {
+            "id": host.id,
+            "name": host.name,
+            "hostname": host.hostname,
+            "port": host.port,
+            "username": host.username,
+            "credential_id": host.credential_id,
+        }
+    ]
+    run = JobRun(
+        project_id=project_id,
+        playbook_id=playbook.id,
+        triggered_by=principal.email or "user",
+        status=JobStatus.pending,
+        target_snapshot={
+            "hosts": snapshot_hosts,
+            "group_ids": [],
+            "host_ids": [host.id],
+            "extra_vars": {"__facts_run": True},
+            "dry_run": False,
+            "facts_run": True,
+            "params_before": {},
+            "params_after": {"__facts_run": True},
+        },
+        logs="",
+    )
+    db.add(run)
+    await db.commit()
+    await db.refresh(run)
+    await enqueue_run(run.id, project_id=project_id)
+    await audit_log(
+        db,
+        project_id=project_id,
+        actor=principal.email,
+        actor_role=str(principal.role.value),
+        action="host.facts_refresh",
+        entity_type="host",
+        entity_id=host.id,
+        meta={"run_id": run.id},
+    )
+    return run
+
+
+@router.post("/{host_id}/facts", status_code=status.HTTP_204_NO_CONTENT)
+async def update_facts(
+    host_id: int,
+    payload: HostFactsUpdate,
+    db: AsyncSession = Depends(get_db),
+    principal=Depends(require_permission(Permission.ansible_run)),
+    project_id: int = Depends(get_current_project_id),
+):
+    res = await db.execute(
+        select(Host)
+        .where(Host.id == host_id)
+        .where(Host.project_id == project_id)
+        .where(host_access_clause(principal))
+    )
+    host = res.scalar_one_or_none()
+    if not host:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Хост не найден")
+    host.facts_snapshot = payload.facts
+    host.facts_checked_at = datetime.utcnow()
+    await db.commit()
+    await db.refresh(host)
+    await audit_log(
+        db,
+        project_id=project_id,
+        actor=principal.email,
+        actor_role=str(principal.role.value),
+        action="host.facts_update",
+        entity_type="host",
+        entity_id=host.id,
+        meta={"facts_keys": len(payload.facts)},
+    )
+    return None
+
+
+@router.get("/{host_id}/health-history", response_model=list[HostHealthHistoryRead])
+async def health_history(
+    host_id: int,
+    db: AsyncSession = Depends(get_db),
+    principal=Depends(require_permission(Permission.hosts_read)),
+    project_id: int = Depends(get_current_project_id),
+    limit: int = Query(default=20, ge=1, le=200),
+):
+    res = await db.execute(
+        select(Host)
+        .where(Host.id == host_id)
+        .where(Host.project_id == project_id)
+        .where(host_access_clause(principal))
+    )
+    host = res.scalar_one_or_none()
+    if not host:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Хост не найден")
+    query = await db.execute(
+        select(HostHealthCheck)
+        .where(HostHealthCheck.host_id == host_id)
+        .where(HostHealthCheck.project_id == project_id)
+        .order_by(HostHealthCheck.checked_at.desc())
+        .limit(limit)
+    )
+    return query.scalars().all()
 
 
 @router.websocket("/{host_id}/terminal")

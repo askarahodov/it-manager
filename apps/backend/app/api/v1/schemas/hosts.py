@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -72,6 +72,8 @@ class HostStatusCheckResponse(BaseModel):
     id: int
     status: HostStatusEnum
     last_checked_at: Optional[datetime]
+    health_snapshot: Optional[Dict[str, float | int | str]] = None
+    health_checked_at: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -84,5 +86,23 @@ class HostRead(HostBase):
     last_run_id: Optional[int] = None
     last_run_status: Optional[str] = None
     last_run_at: Optional[datetime] = None
+    health_snapshot: Optional[Dict[str, float | int | str]] = None
+    health_checked_at: Optional[datetime] = None
+    facts_snapshot: Optional[Dict[str, Any]] = None
+    facts_checked_at: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class HostHealthHistoryRead(BaseModel):
+    id: int
+    host_id: int
+    status: HostStatusEnum
+    snapshot: Optional[Dict[str, float | int | str]] = None
+    checked_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class HostFactsUpdate(BaseModel):
+    facts: Dict[str, Any]

@@ -62,10 +62,10 @@
 - [x] миграция существующих данных в default project
 
 ## Фаза 10: Advanced Host Health (лайтовый мониторинг)
-- [ ] расширенный health snapshot: uptime/load/disk/memory
-- [ ] last ansible run status на карточке хоста
-- [ ] history (упрощённый time-series) + хранение последнего статуса
-- [ ] custom checks через ansible facts/модули (MVP)
+- [x] расширенный health snapshot: uptime/load/disk/memory
+- [x] last ansible run status на карточке хоста
+- [x] history (упрощённый time-series) + хранение последнего статуса
+- [x] custom checks через ansible facts/модули (MVP)
 
 ## Фаза 11: Automation 2.0
 - [x] playbook templates (vars schema + defaults)
@@ -75,7 +75,7 @@
 - [x] approval diff параметров (before/after по запуску)
 - [x] event-driven triggers: webhook/api call
 - [x] event-driven triggers: host added/tag changed
-- [ ] event-driven triggers: secret rotated
+- [x] event-driven triggers: secret rotated
 
 ## Фаза 12: Secrets Vault — Enterprise
 - [ ] secret rotation (manual/scheduled) + политики
@@ -90,8 +90,9 @@
 
 ## Фаза 14: UI/UX как у зрелого продукта
 - [ ] global search + Cmd/Ctrl+K quick actions
-- [ ] dashboard widgets: hosts status/failed runs/upcoming schedules/expiring secrets/recent SSH
-- [ ] audit log UI: фильтры + экспорт + before/after + source/IP
+- [x] dashboard widgets: hosts status/failed runs/upcoming schedules/recent SSH
+- [x] dashboard widgets: expiring secrets
+- [x] audit log UI: фильтры + экспорт + before/after + source/IP
 
 ## Фаза 15: Интеграции и масштабирование
 - [ ] git integration: playbooks из repo + auto-sync + commit hash в run history

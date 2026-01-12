@@ -14,6 +14,7 @@ class AuditEventRead(BaseModel):
     entity_id: Optional[int] = None
     success: bool
     meta: dict[str, Any] = Field(default_factory=dict)
+    source_ip: Optional[str] = None
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)

@@ -16,6 +16,7 @@ type AuditEvent = {
   entity_id?: number | null;
   success: boolean;
   meta: Record<string, unknown>;
+  source_ip?: string | null;
   created_at: string;
 };
 
@@ -55,6 +56,11 @@ function SettingsPage() {
   const [audit, setAudit] = useState<AuditEvent[]>([]);
   const [auditError, setAuditError] = useState<string | null>(null);
   const [auditLoading, setAuditLoading] = useState(false);
+  const [auditLimit, setAuditLimit] = useState(100);
+  const [auditAction, setAuditAction] = useState("");
+  const [auditEntityType, setAuditEntityType] = useState("");
+  const [auditActor, setAuditActor] = useState("");
+  const [auditSourceIp, setAuditSourceIp] = useState("");
   const [users, setUsers] = useState<UserItem[]>([]);
   const [usersError, setUsersError] = useState<string | null>(null);
   const [usersLoading, setUsersLoading] = useState(false);
@@ -153,7 +159,13 @@ function SettingsPage() {
     setAuditLoading(true);
     setAuditError(null);
     try {
-      const items = await apiFetch<AuditEvent[]>("/api/v1/audit/?limit=100", { token });
+      const params = new URLSearchParams();
+      params.set("limit", String(auditLimit));
+      if (auditAction.trim()) params.set("action", auditAction.trim());
+      if (auditEntityType.trim()) params.set("entity_type", auditEntityType.trim());
+      if (auditActor.trim()) params.set("actor", auditActor.trim());
+      if (auditSourceIp.trim()) params.set("source_ip", auditSourceIp.trim());
+      const items = await apiFetch<AuditEvent[]>(`/api/v1/audit/?${params.toString()}`, { token });
       setAudit(items);
     } catch (err) {
       const msg = formatError(err);
@@ -237,6 +249,45 @@ function SettingsPage() {
       setUsersError(msg);
       pushToast({ title: "Ошибка обновления роли", description: msg, variant: "error" });
     }
+  };
+
+  const exportAuditJson = () => {
+    const payload = JSON.stringify(audit, null, 2);
+    const blob = new Blob([payload], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `audit-${new Date().toISOString()}.json`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const exportAuditCsv = () => {
+    const headers = ["id", "created_at", "actor", "actor_role", "action", "entity_type", "entity_id", "success", "source_ip", "meta"];
+    const rows = audit.map((item) => [
+      item.id,
+      item.created_at,
+      item.actor,
+      item.actor_role ?? "",
+      item.action,
+      item.entity_type ?? "",
+      item.entity_id ?? "",
+      item.success ? "yes" : "no",
+      item.source_ip ?? "",
+      JSON.stringify(item.meta ?? {}),
+    ]);
+    const csv = [headers.join(","), ...rows.map((row) => row.map((cell) => `"${String(cell).replaceAll("\"", "\"\"")}"`).join(","))].join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `audit-${new Date().toISOString()}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
   };
 
   const resetUserPassword = async (u: UserItem) => {
@@ -882,6 +933,58 @@ function SettingsPage() {
               <button type="button" className="ghost-button" onClick={() => loadAudit()}>
                 Обновить
               </button>
+              <button type="button" className="ghost-button" onClick={exportAuditJson} disabled={audit.length === 0}>
+                Экспорт JSON
+              </button>
+              <button type="button" className="ghost-button" onClick={exportAuditCsv} disabled={audit.length === 0}>
+                Экспорт CSV
+              </button>
+            </div>
+            <div className="grid" style={{ marginTop: "0.75rem" }}>
+              <label>
+                Action
+                <input value={auditAction} onChange={(e) => setAuditAction(e.target.value)} placeholder="host.update" />
+              </label>
+              <label>
+                Entity type
+                <input value={auditEntityType} onChange={(e) => setAuditEntityType(e.target.value)} placeholder="host/secret" />
+              </label>
+              <label>
+                Actor
+                <input value={auditActor} onChange={(e) => setAuditActor(e.target.value)} placeholder="admin@it.local" />
+              </label>
+              <label>
+                Source IP
+                <input value={auditSourceIp} onChange={(e) => setAuditSourceIp(e.target.value)} placeholder="10.0.0.1" />
+              </label>
+              <label>
+                Limit
+                <input
+                  type="number"
+                  min={10}
+                  max={500}
+                  value={auditLimit}
+                  onChange={(e) => setAuditLimit(Number(e.target.value))}
+                />
+              </label>
+              <div className="row-actions" style={{ alignItems: "flex-end" }}>
+                <button type="button" className="ghost-button" onClick={() => loadAudit()}>
+                  Применить
+                </button>
+                <button
+                  type="button"
+                  className="ghost-button"
+                  onClick={() => {
+                    setAuditAction("");
+                    setAuditEntityType("");
+                    setAuditActor("");
+                    setAuditSourceIp("");
+                    setAuditLimit(100);
+                  }}
+                >
+                  Сброс
+                </button>
+              </div>
             </div>
             {auditLoading && <p>Загружаем...</p>}
             {auditError && <p className="text-error">{auditError}</p>}
@@ -896,6 +999,8 @@ function SettingsPage() {
                       <th>Action</th>
                       <th>Entity</th>
                       <th>OK</th>
+                      <th>Source IP</th>
+                      <th>Meta</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -910,6 +1015,17 @@ function SettingsPage() {
                           {e.entity_type ?? ""} {e.entity_id ? `#${e.entity_id}` : ""}
                         </td>
                         <td>{e.success ? "yes" : "no"}</td>
+                        <td>{e.source_ip ?? "—"}</td>
+                        <td>
+                          {Object.keys(e.meta ?? {}).length > 0 ? (
+                            <details>
+                              <summary>meta</summary>
+                              <pre style={{ whiteSpace: "pre-wrap" }}>{JSON.stringify(e.meta, null, 2)}</pre>
+                            </details>
+                          ) : (
+                            "—"
+                          )}
+                        </td>
                       </tr>
                     ))}
                   </tbody>

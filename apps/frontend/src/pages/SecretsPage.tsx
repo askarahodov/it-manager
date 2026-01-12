@@ -17,6 +17,7 @@ type Secret = {
   scope: SecretScope;
   description?: string | null;
   tags: Record<string, string>;
+  expires_at?: string | null;
   created_at: string;
 };
 
@@ -26,6 +27,7 @@ type SecretFormState = {
   scope: SecretScope;
   description: string;
   tags: string;
+  expires_at: string;
   value: string;
   passphrase: string;
 };
@@ -36,9 +38,26 @@ const defaultForm: SecretFormState = {
   scope: "project",
   description: "",
   tags: "",
+  expires_at: "",
   value: "",
   passphrase: "",
 };
+
+function toInputDate(value?: string | null) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const offset = date.getTimezoneOffset();
+  const local = new Date(date.getTime() - offset * 60_000);
+  return local.toISOString().slice(0, 16);
+}
+
+function toIsoDate(value: string) {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toISOString();
+}
 
 function parseTags(value: string) {
   return value
@@ -123,6 +142,11 @@ function SecretsPage() {
         description: form.description || null,
         tags: parseTags(form.tags),
       };
+      if (form.expires_at) {
+        payload.expires_at = toIsoDate(form.expires_at);
+      } else {
+        payload.expires_at = null;
+      }
       if (form.value) {
         payload.value = form.value;
       }
@@ -209,6 +233,7 @@ function SecretsPage() {
       tags: Object.entries(secret.tags)
         .map(([k, v]) => `${k}=${v}`)
         .join(", "),
+      expires_at: toInputDate(secret.expires_at),
       value: "",
       passphrase: "",
     });
@@ -271,6 +296,7 @@ function SecretsPage() {
                     <th>Название</th>
                     <th>Тип</th>
                     <th>Scope</th>
+                    <th>Истекает</th>
                     <th>Действия</th>
                   </tr>
                 </thead>
@@ -278,6 +304,7 @@ function SecretsPage() {
                   {Array.from({ length: 5 }).map((_, idx) => (
                     <tr key={`skeleton-secret-${idx}`}>
                       <td><span className="skeleton-line" /></td>
+                      <td><span className="skeleton-line small" /></td>
                       <td><span className="skeleton-line small" /></td>
                       <td><span className="skeleton-line small" /></td>
                       <td><span className="skeleton-line" /></td>
@@ -295,6 +322,7 @@ function SecretsPage() {
                     <th>Название</th>
                     <th>Тип</th>
                     <th>Scope</th>
+                    <th>Истекает</th>
                     <th>Действия</th>
                   </tr>
                 </thead>
@@ -304,6 +332,7 @@ function SecretsPage() {
                       <td>{secret.name}</td>
                       <td>{secret.type}</td>
                       <td>{scopeLabel(secret)}</td>
+                      <td>{secret.expires_at ? new Date(secret.expires_at).toLocaleDateString() : "—"}</td>
                       <td>
                         <div className="row-actions">
                           <button
@@ -389,6 +418,16 @@ function SecretsPage() {
             <label>
               Теги (key=value, ...)
               <input value={form.tags} onChange={(e) => setForm((prev) => ({ ...prev, tags: e.target.value }))} disabled={!isAdmin} />
+            </label>
+            <label>
+              Истекает
+              <input
+                type="datetime-local"
+                value={form.expires_at}
+                onChange={(e) => setForm((prev) => ({ ...prev, expires_at: e.target.value }))}
+                disabled={!isAdmin}
+              />
+              <span className="form-helper">Оставьте пустым, если срок не задан.</span>
             </label>
           <label>
             Значение

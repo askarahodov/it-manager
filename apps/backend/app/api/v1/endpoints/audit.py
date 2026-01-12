@@ -27,6 +27,7 @@ async def list_audit(
     action: Optional[str] = None,
     entity_type: Optional[str] = None,
     actor: Optional[str] = None,
+    source_ip: Optional[str] = None,
 ):
     _require_admin(user)
     q = select(AuditEvent).where(AuditEvent.project_id == project_id).order_by(desc(AuditEvent.created_at)).limit(limit)
@@ -36,6 +37,8 @@ async def list_audit(
         q = q.where(AuditEvent.entity_type == entity_type)
     if actor:
         q = q.where(AuditEvent.actor == actor)
+    if source_ip:
+        q = q.where(AuditEvent.source_ip == source_ip)
     query = await db.execute(q)
     items = query.scalars().all()
     # success хранится как 1/0 (int); приводим к bool для схемы

@@ -25,6 +25,18 @@ type Host = {
   last_run_id?: number | null;
   last_run_status?: string | null;
   last_run_at?: string | null;
+  health_snapshot?: Record<string, number | string> | null;
+  health_checked_at?: string | null;
+  facts_snapshot?: Record<string, any> | null;
+  facts_checked_at?: string | null;
+};
+
+type HostHealthRecord = {
+  id: number;
+  host_id: number;
+  status: HostStatus;
+  snapshot?: Record<string, number | string> | null;
+  checked_at: string;
 };
 
 type HostFormState = {
@@ -53,17 +65,46 @@ function parseTags(value: string) {
     }, {});
 }
 
+function formatKb(value?: number) {
+  if (!value && value !== 0) return "—";
+  const gb = value / 1024 / 1024;
+  if (gb >= 1) {
+    return `${gb.toFixed(1)} GB`;
+  }
+  const mb = value / 1024;
+  return `${mb.toFixed(1)} MB`;
+}
+
+function formatUptime(seconds?: number) {
+  if (!seconds && seconds !== 0) return "—";
+  const total = Math.floor(seconds);
+  const days = Math.floor(total / 86400);
+  const hours = Math.floor((total % 86400) / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  if (days > 0) return `${days}d ${hours}h ${minutes}m`;
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  return `${minutes}m`;
+}
+
+function formatFactValue(value?: string | number | null) {
+  if (value === null || value === undefined || value === "") return "—";
+  return String(value);
+}
+
 function HostDetailsPage({ hostId }: { hostId: number }) {
   const { token, status, user } = useAuth();
   const { pushToast } = useToast();
   const canManageHosts = user?.role === "admin" || user?.role === "operator";
   const canSsh = user?.role === "admin" || user?.role === "operator";
+  const canRunAutomation = user?.role === "admin" || user?.role === "operator" || user?.role === "automation-only";
 
   const [activeTab, setActiveTab] = useState<"details" | "terminal">("details");
   const [host, setHost] = useState<Host | null>(null);
   const [secrets, setSecrets] = useState<SecretOption[]>([]);
+  const [healthHistory, setHealthHistory] = useState<HostHealthRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [factsLoading, setFactsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState<HostFormState | null>(null);
 
@@ -94,13 +135,15 @@ function HostDetailsPage({ hostId }: { hostId: number }) {
     setLoading(true);
     setError(null);
     try {
-      const [h, sec] = await Promise.all([
+      const [h, sec, hh] = await Promise.all([
         apiFetch<Host>(`/api/v1/hosts/${hostId}`, { token }),
         apiFetch<SecretOption[]>("/api/v1/secrets/", { token }),
+        apiFetch<HostHealthRecord[]>(`/api/v1/hosts/${hostId}/health-history`, { token }),
       ]);
       setHost(h);
       syncFormFromHost(h);
       setSecrets(sec);
+      setHealthHistory(hh);
     } catch (err) {
       const msg = formatError(err);
       setError(msg);
@@ -195,11 +238,32 @@ function HostDetailsPage({ hostId }: { hostId: number }) {
       const updated = await apiFetch<Host>(`/api/v1/hosts/${hostId}/status-check`, { method: "POST", token });
       setHost(updated);
       if (form) syncFormFromHost(updated);
+      const history = await apiFetch<HostHealthRecord[]>(`/api/v1/hosts/${hostId}/health-history`, { token });
+      setHealthHistory(history);
       pushToast({ title: "Статус обновлён", description: `${updated.name}: ${updated.status}`, variant: "info" });
     } catch (err) {
       const msg = formatError(err);
       setError(msg);
       pushToast({ title: "Ошибка проверки статуса", description: msg, variant: "error" });
+    }
+  };
+
+  const refreshFacts = async () => {
+    if (!token) return;
+    setError(null);
+    setFactsLoading(true);
+    try {
+      if (!canRunAutomation) {
+        throw new Error("Недостаточно прав для запуска facts (нужна роль admin/operator/automation-only).");
+      }
+      const run = await apiFetch<{ id: number }>(`/api/v1/hosts/${hostId}/facts-refresh`, { method: "POST", token });
+      pushToast({ title: "Сбор фактов запущен", description: `Run #${run.id}`, variant: "success" });
+    } catch (err) {
+      const msg = formatError(err);
+      setError(msg);
+      pushToast({ title: "Ошибка запуска facts", description: msg, variant: "error" });
+    } finally {
+      setFactsLoading(false);
     }
   };
 
@@ -243,6 +307,9 @@ function HostDetailsPage({ hostId }: { hostId: number }) {
           </button>
           <button type="button" className="ghost-button" onClick={checkStatus} disabled={loading || !canManageHosts}>
             Проверить статус
+          </button>
+          <button type="button" className="ghost-button" onClick={refreshFacts} disabled={factsLoading || !canRunAutomation}>
+            {factsLoading ? "Собираем факты..." : "Собрать факты"}
           </button>
         </div>
       </header>
@@ -386,6 +453,83 @@ function HostDetailsPage({ hostId }: { hostId: number }) {
                 <div><strong>Время последнего run:</strong> {host.last_run_at ? new Date(host.last_run_at).toLocaleString() : "—"}</div>
                 <div><strong>Метод проверки:</strong> {(host as any).check_method ?? "tcp"}</div>
                 <div><strong>Credential ID:</strong> {host.credential_id ?? "—"}</div>
+                <div><strong>Health snapshot:</strong> {host.health_checked_at ? new Date(host.health_checked_at).toLocaleString() : "—"}</div>
+                {host.health_snapshot ? (
+                  <div className="stack">
+                    <div><strong>Uptime:</strong> {formatUptime(Number(host.health_snapshot.uptime_seconds))}</div>
+                    <div>
+                      <strong>Load:</strong>{" "}
+                      {host.health_snapshot.load1 ?? "—"} / {host.health_snapshot.load5 ?? "—"} / {host.health_snapshot.load15 ?? "—"}
+                    </div>
+                    <div>
+                      <strong>Memory:</strong>{" "}
+                      {formatKb(Number(host.health_snapshot.mem_used_kb))} / {formatKb(Number(host.health_snapshot.mem_total_kb))}
+                    </div>
+                    <div>
+                      <strong>Disk:</strong>{" "}
+                      {formatKb(Number(host.health_snapshot.disk_used_kb))} / {formatKb(Number(host.health_snapshot.disk_total_kb))}{" "}
+                      ({host.health_snapshot.disk_used_percent ?? "—"}%)
+                    </div>
+                  </div>
+                ) : (
+                  <div className="form-helper">Метрики доступны только при проверке по SSH.</div>
+                )}
+                <div><strong>Facts snapshot:</strong> {host.facts_checked_at ? new Date(host.facts_checked_at).toLocaleString() : "—"}</div>
+                {host.facts_snapshot ? (
+                  <div className="stack">
+                    <div><strong>OS:</strong> {formatFactValue(host.facts_snapshot.ansible_distribution)} {formatFactValue(host.facts_snapshot.ansible_distribution_version)}</div>
+                    <div><strong>Kernel:</strong> {formatFactValue(host.facts_snapshot.ansible_kernel)}</div>
+                    <div><strong>CPU:</strong> {formatFactValue(host.facts_snapshot.ansible_processor_vcpus)} vCPU</div>
+                    <details>
+                      <summary>Показать факты</summary>
+                      <pre style={{ whiteSpace: "pre-wrap" }}>{JSON.stringify(host.facts_snapshot, null, 2)}</pre>
+                    </details>
+                  </div>
+                ) : (
+                  <div className="form-helper">Факты обновляются через Ansible.</div>
+                )}
+                <div className="panel">
+                  <div className="panel-title">
+                    <h2>История health checks</h2>
+                  </div>
+                  {healthHistory.length === 0 && <p className="form-helper">Истории проверок пока нет.</p>}
+                  {healthHistory.length > 0 && (
+                    <table className="hosts-table">
+                      <thead>
+                        <tr>
+                          <th>Время</th>
+                          <th>Статус</th>
+                          <th>Load</th>
+                          <th>Memory</th>
+                          <th>Disk</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {healthHistory.map((row) => (
+                          <tr key={row.id}>
+                            <td>{new Date(row.checked_at).toLocaleString()}</td>
+                            <td>{row.status}</td>
+                            <td>
+                              {row.snapshot
+                                ? `${row.snapshot.load1 ?? "—"} / ${row.snapshot.load5 ?? "—"} / ${row.snapshot.load15 ?? "—"}`
+                                : "—"}
+                            </td>
+                            <td>
+                              {row.snapshot
+                                ? `${formatKb(Number(row.snapshot.mem_used_kb))} / ${formatKb(Number(row.snapshot.mem_total_kb))}`
+                                : "—"}
+                            </td>
+                            <td>
+                              {row.snapshot
+                                ? `${formatKb(Number(row.snapshot.disk_used_kb))} / ${formatKb(Number(row.snapshot.disk_total_kb))}`
+                                : "—"}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
               </div>
             ) : (
               <p className="form-helper">Данные ещё не загружены.</p>

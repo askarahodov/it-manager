@@ -72,8 +72,11 @@
 - [x] playbook templates (vars schema + defaults)
 - [x] instances (values + binding)
 - [x] auto-generated форма + валидация типов (string/enum/secret/use-only)
-- [ ] approval flow для prod (requester/approver + diff)
-- [ ] event triggers: host added/tag changed/secret rotated/webhook/api call
+- [x] approval flow для prod (requester/approver)
+- [x] approval diff параметров (before/after по запуску)
+- [x] event triggers: webhook/api call
+- [x] event triggers: host added/tag changed
+- [ ] event triggers: secret rotated
 
 ### Secrets Enterprise
 - [ ] rotation policies (manual/scheduled) + интеграции (SSH password / API token)

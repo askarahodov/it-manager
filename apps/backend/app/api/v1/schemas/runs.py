@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.db.models import JobStatus
 
@@ -24,8 +24,22 @@ class RunRead(BaseModel):
     started_at: Optional[datetime] = None
     finished_at: Optional[datetime] = None
     created_at: datetime
+    approval_id: Optional[int] = None
+    approval_status: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _fill_approval_fields(cls, values):
+        if not isinstance(values, dict):
+            return values
+        snapshot = values.get("target_snapshot") or {}
+        if values.get("approval_id") is None and "approval_id" in snapshot:
+            values["approval_id"] = snapshot.get("approval_id")
+        if values.get("approval_status") is None and "approval_status" in snapshot:
+            values["approval_status"] = snapshot.get("approval_status")
+        return values
 
 
 class RunClaimResponse(BaseModel):

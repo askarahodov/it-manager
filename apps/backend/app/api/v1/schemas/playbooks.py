@@ -60,3 +60,8 @@ class PlaybookRead(PlaybookBase):
     updated_at: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class PlaybookWebhookRead(BaseModel):
+    token: str
+    url_path: str

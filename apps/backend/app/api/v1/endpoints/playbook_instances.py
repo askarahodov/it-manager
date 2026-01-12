@@ -13,6 +13,7 @@ from app.api.v1.schemas.playbook_instances import (
 )
 from app.core.rbac import Permission
 from app.db.models import GroupType, Host, HostGroup, JobRun, JobStatus, Playbook, PlaybookInstance, PlaybookTemplate
+from app.db.models import ApprovalRequest, ApprovalStatus
 from app.services.audit import audit_log
 from app.services.access import apply_group_scope, apply_host_scope
 
@@ -224,11 +225,13 @@ async def run_instance(
         for host in target_hosts.values()
     ]
 
+    defaults_vars = template.vars_defaults or {}
     merged_vars = {}
-    merged_vars.update(template.vars_defaults or {})
+    merged_vars.update(defaults_vars)
     merged_vars.update(instance.values or {})
     merged_vars.update(payload.extra_vars or {})
 
+    requires_approval = any(h.environment == "prod" for h in target_hosts.values())
     run = JobRun(
         project_id=project_id,
         playbook_id=payload.playbook_id,
@@ -242,6 +245,8 @@ async def run_instance(
             "dry_run": payload.dry_run,
             "instance_id": instance.id,
             "template_id": instance.template_id,
+            "params_before": defaults_vars,
+            "params_after": merged_vars,
         },
         logs="",
     )
@@ -251,15 +256,39 @@ async def run_instance(
 
     from app.services.queue import enqueue_run
 
-    await enqueue_run(run.id, project_id=project_id)
-    await audit_log(
-        db,
-        project_id=project_id,
-        actor=principal.email,
-        actor_role=str(principal.role.value),
-        action="run.create_from_instance",
-        entity_type="run",
-        entity_id=run.id,
-        meta={"instance_id": instance.id, "playbook_id": payload.playbook_id, "targets": len(snapshot_hosts)},
-    )
+    if requires_approval:
+        approval = ApprovalRequest(
+            project_id=project_id,
+            run_id=run.id,
+            requested_by=principal.id,
+            status=ApprovalStatus.pending,
+        )
+        db.add(approval)
+        run.target_snapshot["approval_status"] = "pending"
+        await db.commit()
+        await db.refresh(approval)
+        run.target_snapshot["approval_id"] = approval.id
+        await db.commit()
+        await audit_log(
+            db,
+            project_id=project_id,
+            actor=principal.email,
+            actor_role=str(principal.role.value),
+            action="run.create_from_instance_requires_approval",
+            entity_type="run",
+            entity_id=run.id,
+            meta={"instance_id": instance.id, "playbook_id": payload.playbook_id, "targets": len(snapshot_hosts), "approval_id": approval.id},
+        )
+    else:
+        await enqueue_run(run.id, project_id=project_id)
+        await audit_log(
+            db,
+            project_id=project_id,
+            actor=principal.email,
+            actor_role=str(principal.role.value),
+            action="run.create_from_instance",
+            entity_type="run",
+            entity_id=run.id,
+            meta={"instance_id": instance.id, "playbook_id": payload.playbook_id, "targets": len(snapshot_hosts)},
+        )
     return {"run_id": run.id}

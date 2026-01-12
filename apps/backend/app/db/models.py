@@ -179,6 +179,7 @@ class Playbook(Base):
     stored_content = Column(Text, nullable=True)
     inventory_scope = Column(JSONB, default=list)
     variables = Column(JSONB, default=dict)
+    webhook_token = Column(String, nullable=True)
     created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, onupdate=datetime.utcnow())
@@ -214,6 +215,21 @@ class PlaybookInstance(Base):
     updated_at = Column(DateTime, onupdate=datetime.utcnow())
 
 
+class PlaybookTrigger(Base):
+    __tablename__ = "playbook_triggers"
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False, default=1, index=True)
+    playbook_id = Column(Integer, ForeignKey("playbooks.id"), nullable=False)
+    type = Column(String, nullable=False)
+    enabled = Column(Boolean, default=True)
+    filters = Column(JSONB, default=dict)
+    extra_vars = Column(JSONB, default=dict)
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, onupdate=datetime.utcnow())
+
+
 class JobStatus(str, enum.Enum):
     pending = "pending"
     running = "running"
@@ -234,6 +250,26 @@ class JobRun(Base):
     started_at = Column(DateTime, nullable=True)
     finished_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, server_default=func.now())
+
+
+class ApprovalStatus(str, enum.Enum):
+    pending = "pending"
+    approved = "approved"
+    rejected = "rejected"
+
+
+class ApprovalRequest(Base):
+    __tablename__ = "approval_requests"
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False, default=1, index=True)
+    run_id = Column(Integer, ForeignKey("job_runs.id"), nullable=False, index=True)
+    requested_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    decided_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    status = Column(Enum(ApprovalStatus), default=ApprovalStatus.pending, nullable=False)
+    reason = Column(Text, nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
+    decided_at = Column(DateTime, nullable=True)
 
 
 class AuditEvent(Base):

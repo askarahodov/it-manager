@@ -40,6 +40,18 @@ type Run = {
 
 type RunArtifact = { name: string; size: number; mtime: number };
 
+type Approval = {
+  id: number;
+  project_id: number;
+  run_id: number;
+  status: "pending" | "approved" | "rejected";
+  reason?: string | null;
+  requested_by?: number | null;
+  decided_by?: number | null;
+  created_at: string;
+  decided_at?: string | null;
+};
+
 type Host = {
   id: number;
   name: string;
@@ -74,6 +86,17 @@ type PlaybookInstance = {
   created_at: string;
 };
 
+type PlaybookTrigger = {
+  id: number;
+  project_id: number;
+  playbook_id: number;
+  type: "host_created" | "host_tags_changed";
+  enabled: boolean;
+  filters: Record<string, unknown>;
+  extra_vars: Record<string, unknown>;
+  created_at: string;
+};
+
 const defaultPlaybookYaml = `---
 - name: demo
   hosts: all
@@ -92,11 +115,14 @@ function AutomationPage() {
 
   const [playbooks, setPlaybooks] = useState<Playbook[]>([]);
   const [runs, setRuns] = useState<Run[]>([]);
+  const [approvals, setApprovals] = useState<Approval[]>([]);
+  const [triggers, setTriggers] = useState<PlaybookTrigger[]>([]);
   const [hosts, setHosts] = useState<Host[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
   const [templates, setTemplates] = useState<PlaybookTemplate[]>([]);
   const [instances, setInstances] = useState<PlaybookInstance[]>([]);
   const [instanceRunPlaybookIds, setInstanceRunPlaybookIds] = useState<Record<number, number | "">>({});
+  const [approvalReasons, setApprovalReasons] = useState<Record<number, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -111,6 +137,9 @@ function AutomationPage() {
   const [pbScheduleGroupIds, setPbScheduleGroupIds] = useState<number[]>([]);
   const [pbScheduleExtraVars, setPbScheduleExtraVars] = useState<string>("{}");
   const [pbScheduleDry, setPbScheduleDry] = useState(false);
+  const [pbWebhookToken, setPbWebhookToken] = useState<string | null>(null);
+  const [pbWebhookPath, setPbWebhookPath] = useState<string | null>(null);
+  const [pbWebhookLoading, setPbWebhookLoading] = useState(false);
 
   const [editTemplateId, setEditTemplateId] = useState<number | null>(null);
   const [tplName, setTplName] = useState("");
@@ -126,6 +155,13 @@ function AutomationPage() {
   const [instHostIds, setInstHostIds] = useState<number[]>([]);
   const [instGroupIds, setInstGroupIds] = useState<number[]>([]);
 
+  const [editTriggerId, setEditTriggerId] = useState<number | null>(null);
+  const [triggerPlaybookId, setTriggerPlaybookId] = useState<number | "">("");
+  const [triggerType, setTriggerType] = useState<"host_created" | "host_tags_changed">("host_created");
+  const [triggerEnabled, setTriggerEnabled] = useState(true);
+  const [triggerFilters, setTriggerFilters] = useState<string>('{"environments":["prod"],"tags":{"role":"db"}}');
+  const [triggerExtraVars, setTriggerExtraVars] = useState<string>("{}");
+
   const [runModal, setRunModal] = useState<{ open: boolean; playbook: Playbook | null }>({
     open: false,
     playbook: null,
@@ -136,14 +172,23 @@ function AutomationPage() {
   const [runDry, setRunDry] = useState(false);
 
   const [logModal, setLogModal] = useState<{ open: boolean; run: Run | null }>({ open: false, run: null });
+  const [diffModal, setDiffModal] = useState<{ open: boolean; run: Run | null; diff: { added: Record<string, unknown>; removed: Record<string, unknown>; changed: Record<string, { before: unknown; after: unknown }> } | null }>({
+    open: false,
+    run: null,
+    diff: null,
+  });
   const [liveLogs, setLiveLogs] = useState<string>("");
   const [artifacts, setArtifacts] = useState<RunArtifact[]>([]);
   const eventSourceRef = useRef<EventSource | null>(null);
 
   useEffect(() => {
-    if (!runModal.open && !logModal.open) return;
+    if (!runModal.open && !logModal.open && !diffModal.open) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
+      if (diffModal.open) {
+        setDiffModal({ open: false, run: null, diff: null });
+        return;
+      }
       if (logModal.open) {
         eventSourceRef.current?.close();
         setLogModal({ open: false, run: null });
@@ -156,7 +201,7 @@ function AutomationPage() {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [runModal.open, logModal.open]);
+  }, [runModal.open, logModal.open, diffModal.open]);
 
   const scheduleExtraVarsError = useMemo(() => {
     if (!pbScheduleEnabled) return null;
@@ -206,6 +251,26 @@ function AutomationPage() {
     }
   }, [instValues]);
 
+  const triggerFiltersError = useMemo(() => {
+    try {
+      JSON.parse(triggerFilters || "{}");
+      return null;
+    } catch {
+      return "Некорректный JSON в filters.";
+    }
+  }, [triggerFilters]);
+
+  const triggerVarsError = useMemo(() => {
+    try {
+      JSON.parse(triggerExtraVars || "{}");
+      return null;
+    } catch {
+      return "Некорректный JSON в extra vars.";
+    }
+  }, [triggerExtraVars]);
+
+  const triggerJsonError = triggerFiltersError || triggerVarsError;
+
   const selectedTemplate = useMemo(
     () => templates.find((tpl) => tpl.id === Number(instTemplateId)),
     [templates, instTemplateId]
@@ -232,20 +297,24 @@ function AutomationPage() {
     setLoading(true);
     setError(null);
     try {
-      const [pb, rr, hh, gg, tt, ii] = await Promise.all([
+      const [pb, rr, aa, hh, gg, tt, ii, tr] = await Promise.all([
         apiFetch<Playbook[]>("/api/v1/playbooks/", { token }),
         apiFetch<Run[]>("/api/v1/runs/", { token }),
+        apiFetch<Approval[]>("/api/v1/approvals/", { token }),
         apiFetch<Host[]>("/api/v1/hosts/", { token }),
         apiFetch<Group[]>("/api/v1/groups/", { token }),
         apiFetch<PlaybookTemplate[]>("/api/v1/playbook-templates/", { token }),
         apiFetch<PlaybookInstance[]>("/api/v1/playbook-instances/", { token }),
+        apiFetch<PlaybookTrigger[]>("/api/v1/playbook-triggers/", { token }),
       ]);
       setPlaybooks(pb);
       setRuns(rr);
+      setApprovals(aa);
       setHosts(hh);
       setGroups(gg);
       setTemplates(tt);
       setInstances(ii);
+      setTriggers(tr);
     } catch (err) {
       const msg = formatError(err);
       setError(msg);
@@ -269,11 +338,14 @@ function AutomationPage() {
         setLiveLogs("");
         pushToast({ title: "Проект изменён", description: "Live-лог остановлен", variant: "warning" });
       }
+      if (diffModal.open) {
+        setDiffModal({ open: false, run: null, diff: null });
+      }
       refreshAll().catch(() => undefined);
     };
     window.addEventListener("itmgr:project-change", onProjectChange);
     return () => window.removeEventListener("itmgr:project-change", onProjectChange);
-  }, [token, refreshAll, logModal.open, pushToast]);
+  }, [token, refreshAll, logModal.open, diffModal.open, pushToast]);
 
   useEffect(() => {
     if (!playbooks.length || !instances.length) return;
@@ -300,6 +372,8 @@ function AutomationPage() {
     setPbScheduleGroupIds([]);
     setPbScheduleExtraVars("{}");
     setPbScheduleDry(false);
+    setPbWebhookToken(null);
+    setPbWebhookPath(null);
   };
 
   const resetTemplateForm = () => {
@@ -320,6 +394,15 @@ function AutomationPage() {
     setInstGroupIds([]);
   };
 
+  const resetTriggerForm = () => {
+    setEditTriggerId(null);
+    setTriggerPlaybookId("");
+    setTriggerType("host_created");
+    setTriggerEnabled(true);
+    setTriggerFilters('{"environments":["prod"],"tags":{"role":"db"}}');
+    setTriggerExtraVars("{}");
+  };
+
   const startEditInstance = (inst: PlaybookInstance) => {
     setEditInstanceId(inst.id);
     setInstName(inst.name);
@@ -338,11 +421,22 @@ function AutomationPage() {
     setTplDefaults(JSON.stringify(tpl.vars_defaults ?? {}, null, 2));
   };
 
+  const startEditTrigger = (tr: PlaybookTrigger) => {
+    setEditTriggerId(tr.id);
+    setTriggerPlaybookId(tr.playbook_id);
+    setTriggerType(tr.type);
+    setTriggerEnabled(Boolean(tr.enabled));
+    setTriggerFilters(JSON.stringify(tr.filters ?? {}, null, 2));
+    setTriggerExtraVars(JSON.stringify(tr.extra_vars ?? {}, null, 2));
+  };
+
   const startEditPlaybook = (pb: Playbook) => {
     setEditPlaybookId(pb.id);
     setPbName(pb.name);
     setPbDescription(pb.description ?? "");
     setPbYaml(pb.stored_content ?? defaultPlaybookYaml);
+    setPbWebhookToken(null);
+    setPbWebhookPath(null);
     const schedule = pb.schedule ?? null;
     setPbScheduleEnabled(Boolean(schedule?.enabled));
     setPbScheduleType(schedule?.type ?? "interval");
@@ -351,6 +445,42 @@ function AutomationPage() {
     setPbScheduleGroupIds(schedule?.group_ids ?? []);
     setPbScheduleExtraVars(JSON.stringify(schedule?.extra_vars ?? {}, null, 2));
     setPbScheduleDry(Boolean(schedule?.dry_run));
+  };
+
+  const fetchWebhookToken = async () => {
+    if (!token || !editPlaybookId) return;
+    setPbWebhookLoading(true);
+    try {
+      const resp = await apiFetch<{ token: string; url_path: string }>(`/api/v1/playbooks/${editPlaybookId}/webhook-token`, {
+        token,
+      });
+      setPbWebhookToken(resp.token);
+      setPbWebhookPath(resp.url_path);
+    } catch (err) {
+      const msg = formatError(err);
+      pushToast({ title: "Не удалось получить webhook token", description: msg, variant: "error" });
+    } finally {
+      setPbWebhookLoading(false);
+    }
+  };
+
+  const rotateWebhookToken = async () => {
+    if (!token || !editPlaybookId) return;
+    setPbWebhookLoading(true);
+    try {
+      const resp = await apiFetch<{ token: string; url_path: string }>(`/api/v1/playbooks/${editPlaybookId}/webhook-token`, {
+        method: "POST",
+        token,
+      });
+      setPbWebhookToken(resp.token);
+      setPbWebhookPath(resp.url_path);
+      pushToast({ title: "Webhook token обновлён", description: "Скопируйте новый токен.", variant: "success" });
+    } catch (err) {
+      const msg = formatError(err);
+      pushToast({ title: "Не удалось обновить webhook token", description: msg, variant: "error" });
+    } finally {
+      setPbWebhookLoading(false);
+    }
   };
 
   const submitPlaybook = async (e: FormEvent) => {
@@ -549,6 +679,76 @@ function AutomationPage() {
     }
   };
 
+  const submitTrigger = async (e: FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    if (!token) return;
+    if (!isAdmin) {
+      setError("Требуются права admin.");
+      return;
+    }
+    if (triggerJsonError) {
+      setError(triggerJsonError);
+      pushToast({ title: "Ошибка валидации", description: triggerJsonError, variant: "error" });
+      return;
+    }
+    if (!triggerPlaybookId) {
+      const msg = "Нужно выбрать плейбук.";
+      setError(msg);
+      pushToast({ title: "Ошибка валидации", description: msg, variant: "error" });
+      return;
+    }
+    try {
+      const payload = {
+        playbook_id: Number(triggerPlaybookId),
+        type: triggerType,
+        enabled: triggerEnabled,
+        filters: JSON.parse(triggerFilters || "{}"),
+        extra_vars: JSON.parse(triggerExtraVars || "{}"),
+      };
+      const url = editTriggerId ? `/api/v1/playbook-triggers/${editTriggerId}` : "/api/v1/playbook-triggers/";
+      const method = editTriggerId ? "PUT" : "POST";
+      const saved = await apiFetch<PlaybookTrigger>(url, {
+        method,
+        token,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      setTriggers((prev) => {
+        if (editTriggerId) {
+          return prev.map((t) => (t.id === saved.id ? saved : t));
+        }
+        return [saved, ...prev];
+      });
+      resetTriggerForm();
+      pushToast({ title: editTriggerId ? "Триггер обновлён" : "Триггер создан", description: `#${saved.id}`, variant: "success" });
+    } catch (err) {
+      const msg = formatError(err);
+      setError(msg);
+      pushToast({ title: "Ошибка сохранения триггера", description: msg, variant: "error" });
+    }
+  };
+
+  const deleteTrigger = async (tr: PlaybookTrigger) => {
+    if (!token || !isAdmin) return;
+    const ok = await confirm({
+      title: "Удалить триггер?",
+      description: `Будет удалён триггер #${tr.id}.`,
+      confirmText: "Удалить",
+      cancelText: "Отмена",
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      await apiFetch<void>(`/api/v1/playbook-triggers/${tr.id}`, { method: "DELETE", token });
+      setTriggers((prev) => prev.filter((t) => t.id !== tr.id));
+      pushToast({ title: "Триггер удалён", description: `#${tr.id}`, variant: "success" });
+    } catch (err) {
+      const msg = formatError(err);
+      pushToast({ title: "Ошибка удаления триггера", description: msg, variant: "error" });
+    }
+  };
+
   const runInstance = async (inst: PlaybookInstance) => {
     if (!token) return;
     const playbookId = instanceRunPlaybookIds[inst.id];
@@ -690,6 +890,120 @@ function AutomationPage() {
     return map;
   }, [runs]);
 
+  const playbookById = useMemo(() => {
+    const map = new Map<number, Playbook>();
+    playbooks.forEach((pb) => map.set(pb.id, pb));
+    return map;
+  }, [playbooks]);
+
+  const getApprovalStatus = (run: Run) => {
+    const snapshot = run.target_snapshot as Record<string, unknown>;
+    const status = snapshot?.approval_status;
+    return typeof status === "string" ? status : null;
+  };
+
+  const getApprovalTargets = (run?: Run | null) => {
+    if (!run) return "—";
+    const snapshot = run.target_snapshot as Record<string, unknown>;
+    const hostIds = Array.isArray(snapshot?.host_ids) ? snapshot.host_ids.length : 0;
+    const groupIds = Array.isArray(snapshot?.group_ids) ? snapshot.group_ids.length : 0;
+    const hosts = Array.isArray(snapshot?.hosts) ? snapshot.hosts.length : 0;
+    const targetCount = hosts > 0 ? hosts : hostIds + groupIds;
+    return targetCount > 0 ? `${targetCount} целей` : "—";
+  };
+
+  const normalizeRecord = (value: unknown) => {
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      return value as Record<string, unknown>;
+    }
+    return {};
+  };
+
+  const computeParamDiff = (before: Record<string, unknown>, after: Record<string, unknown>) => {
+    const added: Record<string, unknown> = {};
+    const removed: Record<string, unknown> = {};
+    const changed: Record<string, { before: unknown; after: unknown }> = {};
+    const keys = new Set([...Object.keys(before), ...Object.keys(after)]);
+    keys.forEach((key) => {
+      const hasBefore = Object.prototype.hasOwnProperty.call(before, key);
+      const hasAfter = Object.prototype.hasOwnProperty.call(after, key);
+      if (!hasBefore && hasAfter) {
+        added[key] = after[key];
+        return;
+      }
+      if (hasBefore && !hasAfter) {
+        removed[key] = before[key];
+        return;
+      }
+      const beforeValue = before[key];
+      const afterValue = after[key];
+      if (JSON.stringify(beforeValue) !== JSON.stringify(afterValue)) {
+        changed[key] = { before: beforeValue, after: afterValue };
+      }
+    });
+    return { added, removed, changed };
+  };
+
+  const getRunParamsDiff = (run?: Run | null) => {
+    if (!run) return null;
+    const snapshot = run.target_snapshot as Record<string, unknown>;
+    const before = normalizeRecord(snapshot?.params_before);
+    const after = normalizeRecord(snapshot?.params_after);
+    return computeParamDiff(before, after);
+  };
+
+  const getDiffCounts = (diff: { added: Record<string, unknown>; removed: Record<string, unknown>; changed: Record<string, unknown> } | null) => {
+    if (!diff) return { added: 0, removed: 0, changed: 0 };
+    return {
+      added: Object.keys(diff.added).length,
+      removed: Object.keys(diff.removed).length,
+      changed: Object.keys(diff.changed).length,
+    };
+  };
+
+  const hasParamDiff = (diff: { added: Record<string, unknown>; removed: Record<string, unknown>; changed: Record<string, unknown> } | null) => {
+    if (!diff) return false;
+    return Object.keys(diff.added).length > 0 || Object.keys(diff.removed).length > 0 || Object.keys(diff.changed).length > 0;
+  };
+
+  const formatJson = (value: unknown) => JSON.stringify(value, null, 2);
+
+  const openDiffModal = (run: Run) => {
+    const diff = getRunParamsDiff(run);
+    setDiffModal({ open: true, run, diff: diff ? { ...diff } : null });
+  };
+
+  const decideApproval = async (approval: Approval, decision: "approved" | "rejected") => {
+    if (!token) return;
+    if (!isAdmin) {
+      pushToast({ title: "Недостаточно прав", description: "Нужно право admin.", variant: "warning" });
+      return;
+    }
+    try {
+      const reason = approvalReasons[approval.id]?.trim() || null;
+      await apiFetch<void>(`/api/v1/approvals/${approval.id}/decision`, {
+        method: "POST",
+        token,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: decision, reason }),
+      });
+      setApprovalReasons((prev) => {
+        const next = { ...prev };
+        delete next[approval.id];
+        return next;
+      });
+      pushToast({
+        title: decision === "approved" ? "Approval подтверждён" : "Approval отклонён",
+        description: `Run #${approval.run_id}`,
+        variant: decision === "approved" ? "success" : "warning",
+      });
+      refreshAll().catch(() => undefined);
+    } catch (err) {
+      const msg = formatError(err);
+      pushToast({ title: "Ошибка approval", description: msg, variant: "error" });
+    }
+  };
+
   if (!token || status === "anonymous") {
     return (
       <div className="page-content">
@@ -822,7 +1136,7 @@ function AutomationPage() {
         <div className="panel">
           <div className="panel-title">
             <h2>Инстансы плейбуков</h2>
-            <p className="form-helper">Значения шаблонов + привязка целей.</p>
+            <p className="form-helper">Значения шаблонов + привязка целей. Для запуска выберите плейбук в строке.</p>
           </div>
           {instances.length === 0 && <p>Инстансов пока нет</p>}
           {loading && instances.length === 0 && (
@@ -1066,6 +1380,132 @@ function AutomationPage() {
       <div className="grid">
         <div className="panel">
           <div className="panel-title">
+            <h2>Триггеры плейбуков</h2>
+            <p className="form-helper">Автозапуск по событиям: создание хоста, изменение тегов.</p>
+          </div>
+          {triggers.length === 0 && <p>Триггеров пока нет</p>}
+          {loading && triggers.length === 0 && (
+            <table className="hosts-table">
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Тип</th>
+                  <th>Плейбук</th>
+                  <th>Статус</th>
+                  <th>Действия</th>
+                </tr>
+              </thead>
+              <tbody>
+                {Array.from({ length: 3 }).map((_, idx) => (
+                  <tr key={`skeleton-trigger-${idx}`}>
+                    <td><span className="skeleton-line small" /></td>
+                    <td><span className="skeleton-line" /></td>
+                    <td><span className="skeleton-line" /></td>
+                    <td><span className="skeleton-line small" /></td>
+                    <td><span className="skeleton-line" /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+          {triggers.length > 0 && (
+            <table className="hosts-table">
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Тип</th>
+                  <th>Плейбук</th>
+                  <th>Статус</th>
+                  <th>Действия</th>
+                </tr>
+              </thead>
+              <tbody>
+                {triggers.map((tr) => (
+                  <tr key={tr.id}>
+                    <td>{tr.id}</td>
+                    <td>{tr.type}</td>
+                    <td>{playbookById.get(tr.playbook_id)?.name ?? `#${tr.playbook_id}`}</td>
+                    <td>
+                      <span className={`status-pill ${tr.enabled ? "success" : "pending"}`}>{tr.enabled ? "enabled" : "disabled"}</span>
+                    </td>
+                    <td>
+                      <div className="row-actions">
+                        <button type="button" className="ghost-button" onClick={() => startEditTrigger(tr)} disabled={!isAdmin}>
+                          Редактировать
+                        </button>
+                        <button type="button" className="ghost-button" onClick={() => deleteTrigger(tr)} disabled={!isAdmin}>
+                          Удалить
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+
+        <div className="panel">
+          <div className="panel-title">
+            <h2>{editTriggerId ? "Редактировать триггер" : "Создать триггер"}</h2>
+            {!isAdmin && <p className="form-helper">Создание/редактирование доступно только admin.</p>}
+          </div>
+          <form className="form-stack" onSubmit={submitTrigger}>
+            <label>
+              Плейбук
+              <select
+                value={String(triggerPlaybookId)}
+                onChange={(e) => setTriggerPlaybookId(e.target.value ? Number(e.target.value) : "")}
+                disabled={!isAdmin}
+              >
+                <option value="">—</option>
+                {playbooks.map((pb) => (
+                  <option key={pb.id} value={pb.id}>
+                    {pb.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Тип события
+              <select value={triggerType} onChange={(e) => setTriggerType(e.target.value as "host_created" | "host_tags_changed")} disabled={!isAdmin}>
+                <option value="host_created">host_created</option>
+                <option value="host_tags_changed">host_tags_changed</option>
+              </select>
+            </label>
+            <label>
+              Статус
+              <select value={triggerEnabled ? "enabled" : "disabled"} onChange={(e) => setTriggerEnabled(e.target.value === "enabled")} disabled={!isAdmin}>
+                <option value="enabled">enabled</option>
+                <option value="disabled">disabled</option>
+              </select>
+            </label>
+            <label>
+              Filters (JSON)
+              <textarea value={triggerFilters} onChange={(e) => setTriggerFilters(e.target.value)} rows={5} style={{ resize: "vertical" }} disabled={!isAdmin} />
+              {triggerFiltersError && <span className="text-error">{triggerFiltersError}</span>}
+            </label>
+            <label>
+              Extra vars (JSON)
+              <textarea value={triggerExtraVars} onChange={(e) => setTriggerExtraVars(e.target.value)} rows={5} style={{ resize: "vertical" }} disabled={!isAdmin} />
+              {triggerVarsError && <span className="text-error">{triggerVarsError}</span>}
+            </label>
+            <div className="form-actions">
+              <button type="submit" className="primary-button" disabled={!isAdmin || Boolean(triggerJsonError)}>
+                Сохранить
+              </button>
+              <button type="button" className="ghost-button" onClick={resetTriggerForm}>
+                Сброс
+              </button>
+            </div>
+            {error && <span className="text-error form-error">{error}</span>}
+          </form>
+        </div>
+      </div>
+
+      <div className="grid">
+        <div className="panel">
+          <div className="panel-title">
             <h2>Плейбуки</h2>
             <p className="form-helper">MVP: хранение как YAML (stored_content).</p>
           </div>
@@ -1226,6 +1666,41 @@ function AutomationPage() {
                 </label>
               </div>
             </div>
+            <div className="panel" style={{ padding: "0.75rem" }}>
+              <div className="panel-title">
+                <h2>Webhook запуск</h2>
+                <p className="form-helper">Для внешних событий (HTTP POST).</p>
+              </div>
+              {!editPlaybookId && <p className="form-helper">Сохраните плейбук, чтобы сгенерировать webhook token.</p>}
+              <div className="form-stack" style={{ marginTop: 0 }}>
+                <div className="row-actions">
+                  <button
+                    type="button"
+                    className="ghost-button"
+                    onClick={fetchWebhookToken}
+                    disabled={!isAdmin || !editPlaybookId || pbWebhookLoading}
+                  >
+                    Показать
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost-button"
+                    onClick={rotateWebhookToken}
+                    disabled={!isAdmin || !editPlaybookId || pbWebhookLoading}
+                  >
+                    Сгенерировать
+                  </button>
+                </div>
+                <label>
+                  Token
+                  <input value={pbWebhookToken ?? ""} readOnly placeholder="—" />
+                </label>
+                <label>
+                  URL path
+                  <input value={pbWebhookPath ?? ""} readOnly placeholder="—" />
+                </label>
+              </div>
+            </div>
             <div className="form-actions sticky-actions">
               <button type="submit" className="primary-button" disabled={!isAdmin || Boolean(scheduleExtraVarsError)}>
                 Сохранить
@@ -1237,6 +1712,124 @@ function AutomationPage() {
             {error && <span className="text-error form-error">{error}</span>}
           </form>
         </div>
+      </div>
+
+      <div className="panel">
+        <div className="panel-title">
+          <h2>Approval запросы</h2>
+          <p className="form-helper">Запуски на prod требуют подтверждения admin.</p>
+        </div>
+        {approvals.length === 0 && <p>Запросов на approval пока нет</p>}
+        {loading && approvals.length === 0 && (
+          <table className="hosts-table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Run</th>
+                <th>Плейбук</th>
+                <th>Цели</th>
+                <th>Статус</th>
+                <th>Причина</th>
+                <th>Параметры</th>
+                <th>Действия</th>
+              </tr>
+            </thead>
+            <tbody>
+              {Array.from({ length: 3 }).map((_, idx) => (
+                <tr key={`skeleton-approval-${idx}`}>
+                  <td><span className="skeleton-line small" /></td>
+                  <td><span className="skeleton-line small" /></td>
+                  <td><span className="skeleton-line" /></td>
+                  <td><span className="skeleton-line small" /></td>
+                  <td><span className="skeleton-line small" /></td>
+                  <td><span className="skeleton-line" /></td>
+                  <td><span className="skeleton-line" /></td>
+                  <td><span className="skeleton-line" /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        {approvals.length > 0 && (
+          <table className="hosts-table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Run</th>
+                <th>Плейбук</th>
+                <th>Цели</th>
+                <th>Статус</th>
+                <th>Причина</th>
+                <th>Параметры</th>
+                <th>Действия</th>
+              </tr>
+            </thead>
+            <tbody>
+              {approvals.map((approval) => {
+                const run = runs.find((item) => item.id === approval.run_id);
+                const playbookName = run ? playbookById.get(run.playbook_id)?.name ?? `#${run.playbook_id}` : "—";
+                const decisionDisabled = !isAdmin || approval.status !== "pending";
+                const diff = getRunParamsDiff(run);
+                const diffCounts = getDiffCounts(diff);
+                return (
+                  <tr key={approval.id}>
+                    <td>{approval.id}</td>
+                    <td>{approval.run_id}</td>
+                    <td>{playbookName}</td>
+                    <td>{getApprovalTargets(run)}</td>
+                    <td>
+                      <span className={`status-pill ${approval.status}`}>{approval.status}</span>
+                    </td>
+                    <td>
+                      {approval.status === "pending" ? (
+                        <input
+                          value={approvalReasons[approval.id] ?? ""}
+                          onChange={(e) => setApprovalReasons((prev) => ({ ...prev, [approval.id]: e.target.value }))}
+                          placeholder="Комментарий"
+                          disabled={decisionDisabled}
+                        />
+                      ) : (
+                        approval.reason ?? "—"
+                      )}
+                    </td>
+                    <td>
+                      {hasParamDiff(diff) ? (
+                        <div className="diff-summary">
+                          <span className="diff-chip added">+{diffCounts.added}</span>
+                          <span className="diff-chip removed">-{diffCounts.removed}</span>
+                          <span className="diff-chip changed">~{diffCounts.changed}</span>
+                          <button type="button" className="ghost-button" onClick={() => openDiffModal(run!)}>
+                            Показать
+                          </button>
+                        </div>
+                      ) : "—"}
+                    </td>
+                    <td>
+                      <div className="row-actions">
+                        <button
+                          type="button"
+                          className="ghost-button"
+                          onClick={() => decideApproval(approval, "approved")}
+                          disabled={decisionDisabled}
+                        >
+                          Approve
+                        </button>
+                        <button
+                          type="button"
+                          className="ghost-button"
+                          onClick={() => decideApproval(approval, "rejected")}
+                          disabled={decisionDisabled}
+                        >
+                          Reject
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
       </div>
 
       <div className="panel">
@@ -1288,7 +1881,11 @@ function AutomationPage() {
                 <tr key={r.id}>
                   <td>{r.id}</td>
                   <td>{r.playbook_id}</td>
-                  <td>{r.status}</td>
+                  <td>
+                    <span className={`status-pill ${r.status}`}>
+                      {getApprovalStatus(r) === "pending" ? "pending (approval)" : r.status}
+                    </span>
+                  </td>
                   <td>{r.triggered_by}</td>
                   <td>{r.started_at ? "запущен" : "в очереди"}</td>
                   <td>
@@ -1421,6 +2018,38 @@ function AutomationPage() {
             </div>
             <div className="panel" style={{ flex: 1, overflow: "auto" }}>
               <pre style={{ whiteSpace: "pre-wrap" }}>{liveLogs}</pre>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {diffModal.open && diffModal.run && (
+        <div className="modal-overlay">
+          <div className="modal full">
+            <div className="modal-header">
+              <div>
+                <strong>Diff параметров: run {diffModal.run.id}</strong>
+                <div className="form-helper">Playbook #{diffModal.run.playbook_id}</div>
+              </div>
+              <div className="row-actions">
+                <button type="button" className="ghost-button" onClick={() => setDiffModal({ open: false, run: null, diff: null })}>
+                  Закрыть
+                </button>
+              </div>
+            </div>
+            <div className="diff-grid">
+              <div className="diff-card added">
+                <div className="diff-card-title">Добавлено</div>
+                <pre>{formatJson(diffModal.diff?.added ?? {})}</pre>
+              </div>
+              <div className="diff-card removed">
+                <div className="diff-card-title">Удалено</div>
+                <pre>{formatJson(diffModal.diff?.removed ?? {})}</pre>
+              </div>
+              <div className="diff-card changed">
+                <div className="diff-card-title">Изменено</div>
+                <pre>{formatJson(diffModal.diff?.changed ?? {})}</pre>
+              </div>
             </div>
           </div>
         </div>

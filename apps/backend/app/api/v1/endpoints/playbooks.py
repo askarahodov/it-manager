@@ -1,20 +1,30 @@
 import logging
+import secrets
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.deps import get_current_project_id, get_db, require_permission
-from app.api.v1.schemas.playbooks import PlaybookCreate, PlaybookRead, PlaybookSchedule, PlaybookUpdate
+from app.api.v1.schemas.playbooks import PlaybookCreate, PlaybookRead, PlaybookSchedule, PlaybookUpdate, PlaybookWebhookRead
 from app.api.v1.schemas.runs import RunCreateRequest, RunRead
 from app.core.rbac import Permission
 from app.db.models import GroupType, Host, HostGroup, JobRun, JobStatus, Playbook
+from app.db.models import ApprovalRequest, ApprovalStatus
 from app.services.access import apply_group_scope, apply_host_scope
 from app.services.audit import audit_log
 from app.services.queue import enqueue_run
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+def _require_admin(principal) -> None:
+    if getattr(principal.role, "value", str(principal.role)) != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Требуются права admin")
+
+
+def _webhook_path(playbook_id: int, token: str) -> str:
+    return f"/api/v1/playbooks/{playbook_id}/webhook?token={token}"
 
 
 async def _resolve_group_hosts(db: AsyncSession, group: HostGroup, principal) -> list[Host]:
@@ -55,6 +65,38 @@ async def _resolve_group_hosts(db: AsyncSession, group: HostGroup, principal) ->
     )
     return query.scalars().all()
 
+
+async def _resolve_group_hosts_no_scope(db: AsyncSession, group: HostGroup) -> list[Host]:
+    from app.db.models import DynamicGroupHostCache, GroupHost  # локальный импорт
+
+    if group.type == GroupType.static:
+        query = await db.execute(
+            select(Host)
+            .join(GroupHost, GroupHost.host_id == Host.id)
+            .where(GroupHost.group_id == group.id)
+            .where(Host.project_id == group.project_id)
+            .order_by(Host.name)
+        )
+        return query.scalars().all()
+
+    cached = await db.execute(
+        select(Host)
+        .join(DynamicGroupHostCache, DynamicGroupHostCache.host_id == Host.id)
+        .where(DynamicGroupHostCache.group_id == group.id)
+        .where(Host.project_id == group.project_id)
+        .order_by(Host.name)
+    )
+    hosts = cached.scalars().all()
+    if hosts:
+        return hosts
+
+    from app.services.group_rules import build_host_filter
+
+    expr = build_host_filter(group.rule)
+    query = await db.execute(
+        select(Host).where(Host.project_id == group.project_id).where(expr).order_by(Host.name)
+    )
+    return query.scalars().all()
 
 @router.get("/", response_model=list[PlaybookRead])
 async def list_playbooks(
@@ -117,6 +159,146 @@ async def get_playbook(
     return playbook
 
 
+@router.get("/{playbook_id}/webhook-token", response_model=PlaybookWebhookRead)
+async def get_webhook_token(
+    playbook_id: int,
+    db: AsyncSession = Depends(get_db),
+    principal=Depends(require_permission(Permission.ansible_edit)),
+    project_id: int = Depends(get_current_project_id),
+):
+    _require_admin(principal)
+    playbook = await db.get(Playbook, playbook_id)
+    if not playbook or playbook.project_id != project_id:
+        raise HTTPException(status_code=404, detail="Плейбук не найден")
+    if not playbook.webhook_token:
+        raise HTTPException(status_code=404, detail="Webhook token не задан")
+    return PlaybookWebhookRead(token=playbook.webhook_token, url_path=_webhook_path(playbook.id, playbook.webhook_token))
+
+
+@router.post("/{playbook_id}/webhook-token", response_model=PlaybookWebhookRead)
+async def rotate_webhook_token(
+    playbook_id: int,
+    db: AsyncSession = Depends(get_db),
+    principal=Depends(require_permission(Permission.ansible_edit)),
+    project_id: int = Depends(get_current_project_id),
+):
+    _require_admin(principal)
+    playbook = await db.get(Playbook, playbook_id)
+    if not playbook or playbook.project_id != project_id:
+        raise HTTPException(status_code=404, detail="Плейбук не найден")
+    playbook.webhook_token = secrets.token_urlsafe(24)
+    await db.commit()
+    return PlaybookWebhookRead(token=playbook.webhook_token, url_path=_webhook_path(playbook.id, playbook.webhook_token))
+
+
+@router.post("/{playbook_id}/webhook", response_model=RunRead, status_code=status.HTTP_201_CREATED)
+async def run_playbook_webhook(
+    playbook_id: int,
+    payload: RunCreateRequest,
+    token: str | None = Query(default=None),
+    x_webhook_token: str | None = Header(default=None, alias="X-Webhook-Token"),
+    db: AsyncSession = Depends(get_db),
+):
+    provided_token = x_webhook_token or token
+    if not provided_token:
+        raise HTTPException(status_code=403, detail="Webhook token required")
+
+    playbook = await db.get(Playbook, playbook_id)
+    if not playbook:
+        raise HTTPException(status_code=404, detail="Плейбук не найден")
+    if not playbook.webhook_token or playbook.webhook_token != provided_token:
+        raise HTTPException(status_code=403, detail="Неверный webhook token")
+
+    target_hosts: dict[int, Host] = {}
+    if payload.host_ids:
+        query = await db.execute(
+            select(Host).where(Host.project_id == playbook.project_id).where(Host.id.in_(payload.host_ids))
+        )
+        for host in query.scalars().all():
+            target_hosts[host.id] = host
+
+    if payload.group_ids:
+        query = await db.execute(
+            select(HostGroup)
+            .where(HostGroup.project_id == playbook.project_id)
+            .where(HostGroup.id.in_(payload.group_ids))
+        )
+        groups = query.scalars().all()
+        for group in groups:
+            for host in await _resolve_group_hosts_no_scope(db, group):
+                target_hosts[host.id] = host
+
+    snapshot_hosts = [
+        {
+            "id": host.id,
+            "name": host.name,
+            "hostname": host.hostname,
+            "port": host.port,
+            "username": host.username,
+            "credential_id": host.credential_id,
+        }
+        for host in target_hosts.values()
+    ]
+
+    requires_approval = any(h.environment == "prod" for h in target_hosts.values())
+    run = JobRun(
+        project_id=playbook.project_id,
+        playbook_id=playbook_id,
+        triggered_by="webhook",
+        status=JobStatus.pending,
+        target_snapshot={
+            "hosts": snapshot_hosts,
+            "group_ids": payload.group_ids,
+            "host_ids": payload.host_ids,
+            "extra_vars": payload.extra_vars,
+            "dry_run": payload.dry_run,
+            "params_before": {},
+            "params_after": payload.extra_vars or {},
+        },
+        logs="",
+    )
+    db.add(run)
+    await db.commit()
+    await db.refresh(run)
+
+    if requires_approval:
+        approval = ApprovalRequest(
+            project_id=playbook.project_id,
+            run_id=run.id,
+            requested_by=None,
+            status=ApprovalStatus.pending,
+        )
+        db.add(approval)
+        run.target_snapshot["approval_status"] = "pending"
+        await db.commit()
+        await db.refresh(approval)
+        run.target_snapshot["approval_id"] = approval.id
+        await db.commit()
+        await audit_log(
+            db,
+            project_id=playbook.project_id,
+            actor="webhook",
+            actor_role="webhook",
+            action="run.create_webhook_requires_approval",
+            entity_type="run",
+            entity_id=run.id,
+            meta={"playbook_id": playbook_id, "targets": len(snapshot_hosts), "approval_id": approval.id},
+        )
+    else:
+        await enqueue_run(run.id, project_id=playbook.project_id)
+        await audit_log(
+            db,
+            project_id=playbook.project_id,
+            actor="webhook",
+            actor_role="webhook",
+            action="run.create_webhook",
+            entity_type="run",
+            entity_id=run.id,
+            meta={"playbook_id": playbook_id, "targets": len(snapshot_hosts)},
+        )
+    return run
+
+
 @router.post("/{playbook_id}/run", response_model=RunRead, status_code=status.HTTP_201_CREATED)
 async def run_playbook(
     playbook_id: int,
@@ -168,6 +350,7 @@ async def run_playbook(
         for host in target_hosts.values()
     ]
 
+    requires_approval = any(h.environment == "prod" for h in target_hosts.values())
     run = JobRun(
         project_id=project_id,
         playbook_id=playbook_id,
@@ -179,6 +362,8 @@ async def run_playbook(
             "host_ids": payload.host_ids,
             "extra_vars": payload.extra_vars,
             "dry_run": payload.dry_run,
+            "params_before": {},
+            "params_after": payload.extra_vars or {},
         },
         logs="",
     )
@@ -186,17 +371,41 @@ async def run_playbook(
     await db.commit()
     await db.refresh(run)
 
-    await enqueue_run(run.id, project_id=project_id)
-    await audit_log(
-        db,
-        project_id=project_id,
-        actor=principal.email,
-        actor_role=str(principal.role.value),
-        action="run.create",
-        entity_type="run",
-        entity_id=run.id,
-        meta={"playbook_id": playbook_id, "targets": len(snapshot_hosts)},
-    )
+    if requires_approval:
+        approval = ApprovalRequest(
+            project_id=project_id,
+            run_id=run.id,
+            requested_by=principal.id,
+            status=ApprovalStatus.pending,
+        )
+        db.add(approval)
+        run.target_snapshot["approval_status"] = "pending"
+        await db.commit()
+        await db.refresh(approval)
+        run.target_snapshot["approval_id"] = approval.id
+        await db.commit()
+        await audit_log(
+            db,
+            project_id=project_id,
+            actor=principal.email,
+            actor_role=str(principal.role.value),
+            action="run.create_requires_approval",
+            entity_type="run",
+            entity_id=run.id,
+            meta={"playbook_id": playbook_id, "targets": len(snapshot_hosts), "approval_id": approval.id},
+        )
+    else:
+        await enqueue_run(run.id, project_id=project_id)
+        await audit_log(
+            db,
+            project_id=project_id,
+            actor=principal.email,
+            actor_role=str(principal.role.value),
+            action="run.create",
+            entity_type="run",
+            entity_id=run.id,
+            meta={"playbook_id": playbook_id, "targets": len(snapshot_hosts)},
+        )
     return run
 
 

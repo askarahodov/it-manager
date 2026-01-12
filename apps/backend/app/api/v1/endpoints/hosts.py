@@ -18,6 +18,7 @@ from app.services.access import apply_host_scope, host_access_clause
 from app.services.audit import audit_log
 from app.services.encryption import decrypt_value
 from app.services.projects import ProjectAccessDenied, ProjectNotFound, resolve_current_project_id
+from app.services.triggers import dispatch_host_triggers
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -168,6 +169,7 @@ async def create_host(
         entity_id=new_host.id,
         meta={"name": new_host.name, "hostname": new_host.hostname, "port": new_host.port},
     )
+    await dispatch_host_triggers(db, new_host, "host_created")
     return new_host
 
 
@@ -203,6 +205,7 @@ async def update_host(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Хост не найден")
 
     updates = payload.model_dump(exclude_unset=True)
+    previous_tags = dict(existing.tags or {})
     if "credential_id" in updates and updates["credential_id"]:
         secret = await db.get(Secret, int(updates["credential_id"]))
         if not secret or (secret.project_id is not None and secret.project_id != project_id):
@@ -222,6 +225,8 @@ async def update_host(
         entity_id=existing.id,
         meta={"name": existing.name, "hostname": existing.hostname, "port": existing.port},
     )
+    if updates.get("tags") is not None and dict(existing.tags or {}) != previous_tags:
+        await dispatch_host_triggers(db, existing, "host_tags_changed")
     return existing
 
 

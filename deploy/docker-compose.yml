@@ -1,0 +1,118 @@
+services:
+  db:
+    image: postgres:15
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
+      POSTGRES_DB: ${POSTGRES_DB:-it_manager}
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-it_manager}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  backend:
+    build:
+      context: ../apps/backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://postgres:password@db:5432/it_manager}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      MASTER_KEY: ${MASTER_KEY:-change-me}
+      SECRET_KEY: ${SECRET_KEY:-change-me}
+      ARTIFACTS_DIR: ${ARTIFACTS_DIR:-/var/ansible}
+      FRONTEND_CORS_ORIGINS: ${FRONTEND_CORS_ORIGINS:-http://localhost:4173}
+      BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-admin@it.local}
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-admin123}
+      JSON_LOGS: ${JSON_LOGS:-false}
+    volumes:
+      - backend_data:/app/data
+      - ansible_workspace:/var/ansible:ro
+    ports:
+      - 8000:8000
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import httpx; r=httpx.get('http://127.0.0.1:8000/healthz', timeout=2); r.raise_for_status()\"",
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  frontend:
+    build:
+      context: ../apps/frontend
+    restart: unless-stopped
+    ports:
+      - 4173:80
+    depends_on:
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1/ >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  worker:
+    build:
+      context: ../apps/worker
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    environment:
+      MASTER_KEY: ${MASTER_KEY:-change-me}
+      SECRET_KEY: ${SECRET_KEY:-change-me}
+      BACKEND_URL: ${BACKEND_URL:-http://backend:8000}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      WORKER_RECOMPUTE_INTERVAL_SECONDS: ${WORKER_RECOMPUTE_INTERVAL_SECONDS:-60}
+      WORKER_SCHEDULE_POLL_SECONDS: ${WORKER_SCHEDULE_POLL_SECONDS:-10}
+      WORKER_RUN_TIMEOUT_SECONDS: ${WORKER_RUN_TIMEOUT_SECONDS:-1800}
+      WORKER_RUN_MAX_RETRIES: ${WORKER_RUN_MAX_RETRIES:-3}
+      WORKER_RUN_STALE_SECONDS: ${WORKER_RUN_STALE_SECONDS:-3600}
+      WORKER_KEEP_SENSITIVE_ARTIFACTS: ${WORKER_KEEP_SENSITIVE_ARTIFACTS:-false}
+      WORKER_USE_ANSIBLE_RUNNER: ${WORKER_USE_ANSIBLE_RUNNER:-true}
+    volumes:
+      - ansible_workspace:/var/ansible
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import httpx; r=httpx.get('http://backend:8000/healthz', timeout=2); r.raise_for_status()\"",
+        ]
+      interval: 20s
+      timeout: 5s
+      retries: 10
+
+  # Встроенный SSH-хост для разработки/тестов терминала и Ansible.
+  # Доступен только внутри docker network.
+  # Логин: demo / demo123
+  ssh-demo:
+    build:
+      context: ./ssh-demo
+    restart: unless-stopped
+
+volumes:
+  db_data:
+  backend_data:
+  ansible_workspace:

@@ -1,0 +1,13 @@
+venv/
+__pycache__/
+*.pyc
+node_modules/
+/apps/frontend/dist/
+/apps/frontend/test-results/
+/apps/frontend/playwright-report/
+/apps/frontend/.pw-browsers/
+/apps/frontend/e2e-artifacts/
+.env
+*.log
+build/
+/.DS_Store

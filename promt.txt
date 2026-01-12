@@ -1,0 +1,336 @@
+Ты — Senior IT Manager / Solution Architect / Tech Lead + Full-stack developer. Твоя задача: спроектировать и реализовать продукт “IT Manager” для инвентаризации и автоматизации IT-инфраструктуры.
+
+0) Цели проекта
+
+Сделать web-приложение в стиле Admin Dashboard для:
+
+Инвентаризации: список хостов, CRUD (добавление/удаление/редактирование), проверка статуса.
+
+Доступа: SSH терминальный вход на хост и работа в терминале из браузера.
+
+Группировки хостов: CRUD групп, типы групп — статические и автоматические (по правилам/тегам/метаданным).
+
+Автоматизации (Ansible): CRUD плейбуков, запуск вручную и по расписанию, история запусков, логирование, статус, удобный UX.
+
+Хранилища секретов: типы секретов — text, password, token; CRUD; очень продуманная интеграция с хостами/Ansible.
+
+Запуск в Docker Compose: сборка, миграции, запуск, понятный каталог проекта.
+
+Roadmap и чек-листы: вести roadmap, разбивать на задачи, отмечать прогресс, документировать решение и код.
+
+В конце должна получиться репа, которую можно поднять командой типа docker compose up -d и получить рабочий интерфейс.
+
+1) Требования к архитектуре (обязательные решения)
+
+Выбери стек, который обеспечивает быстрый development и хороший UX. Предпочтение:
+
+Backend: Python FastAPI (async), либо Node.js (NestJS).
+
+DB: PostgreSQL.
+
+ORM/migrations: SQLAlchemy + Alembic (если Python) / Prisma (если Node).
+
+Frontend: React + TypeScript + Vite + UI-kit под admin dashboard (например, shadcn/ui или аналог).
+
+SSH в браузере: WebSocket-туннель + xterm.js на фронте. На бэке — безопасный SSH-клиент (paramiko/asyncssh или node-ssh) с проксированием stdin/stdout через WS.
+
+Jobs/scheduler: отдельный воркер контейнер. Для расписаний — APScheduler/Celery Beat (Python) или BullMQ/Agenda (Node).
+
+Ansible runner: ansible-runner (Python) или запуск ansible внутри контейнера воркера с контролируемыми volume/workdir.
+
+Secrets: хранение в БД в зашифрованном виде (envelope encryption) + master key из env. Безопасность — обязательна.
+
+Auth: базовая (логин/пароль + JWT) или SSO-ready. Минимально — local auth с ролями (admin/user).
+
+Если считаешь другой стек лучше — используй, но обоснуй и соблюдай все функциональные требования.
+
+2) Функциональные требования (детально)
+2.1 Hosts (Инвентаризация)
+
+Сущность Host:
+
+name, hostname/IP, port, OS/тип, environment, tags (key/value), description
+
+статус: online/offline/unknown (результат проверки)
+
+метод проверки: ping/tcp connect/ssh connect (настраиваемо)
+
+ссылка на credential/secret для доступа (через vault)
+
+UI:
+
+таблица хостов (поиск, фильтры, сортировка)
+
+карточка хоста (детали + действия)
+
+CRUD формы с валидацией
+
+кнопка “Check status”
+
+API:
+
+CRUD + endpoint проверки статуса (async), результат сохранять в БД.
+
+2.2 SSH Terminal in Browser
+
+В карточке хоста — вкладка Terminal:
+
+xterm.js, resize handling, reconnect
+
+backend WS: аутентификация пользователя, авторизация к хосту, выдача сессии
+
+логирование событий (кто и когда подключался) без записи содержимого команд (по умолчанию)
+
+Секреты/учётки:
+
+доступ через Vault (секреты не светить в UI)
+
+поддержка password и private key (если реализуешь ключи — хранить безопасно)
+
+2.3 Host Groups
+
+Сущность Group:
+
+name, type: static | dynamic
+
+для static: список hosts
+
+для dynamic: правила (например: tags.env == "prod" AND os == "linux")
+
+UI:
+
+список групп
+
+страница группы: состав, правила (для dynamic), CRUD
+
+Для dynamic групп:
+
+реализовать простой rule engine (JSON rules / SQL-фильтр)
+
+пересчёт состава по событию изменения хоста и/или периодически.
+
+2.4 Automation (Ansible)
+
+Сущность Playbook:
+
+name, description, repo_path или stored_content (выбери модель)
+
+inventory scope: host(s) / group(s)
+
+variables: key/value, поддержка ссылок на secrets (например {{ secret:ID }})
+
+schedule: cron/interval, enable/disable
+
+Запуски:
+
+сущность JobRun/Execution:
+
+playbook_id, started_at, finished_at, status, triggered_by (user/schedule), target snapshot, logs (stream)
+
+UX (очень важно):
+
+мастер-форма “Create Playbook”
+
+экран запуска: выбрать цель (хост/группа), параметры, dry-run
+
+История выполнений: таблица, фильтры, просмотр логов, скачивание артефактов
+
+live-лог во время выполнения (WS/SSE)
+
+Надёжность:
+
+очередь задач, ретраи, таймауты
+
+изоляция исполнения (отдельный воркер контейнер)
+
+хранить результаты и метаданные в БД.
+
+2.5 Secrets Vault
+
+Типы секретов: text/password/token (минимум)
+
+CRUD + метаданные: name, type, description, scope (global/project), tags
+
+Хранение:
+
+шифрование значений в БД (AES-GCM/NaCl) с master key из ENV
+
+никогда не возвращать секрет целиком через API после создания (кроме явного reveal с доп. подтверждением прав)
+
+Интеграция:
+
+в Hosts — выбор credential/secret
+
+в Playbook variables — возможность ссылаться на секреты
+
+в runtime при запуске ansible — секреты подставляются безопасно (в памяти, без лишнего логирования)
+
+UI:
+
+список секретов (без значений), создание/редактирование, кнопка reveal (по роли admin)
+
+подсказки и защита от случайного раскрытия
+
+3) Нефункциональные требования
+
+Безопасность:
+
+RBAC роли: admin/user (минимум)
+
+аудит: логировать CRUD и подключения SSH (события)
+
+защита от SSRF/подстановок в ssh/ansible (валидация hostnames, запрет опасных параметров)
+
+Документация:
+
+README (быстрый старт, архитектура)
+
+docs/ (API, схемы, решения)
+
+ADR (Architecture Decision Records) для ключевых решений
+
+Тестирование:
+
+unit + интеграционные тесты для критичных модулей (auth, secrets, scheduler, api)
+
+Observability:
+
+structured logging, healthchecks
+
+Стиль:
+
+admin dashboard layout (sidebar, topbar, pages)
+
+аккуратные формы и таблицы, toast-уведомления, модалки подтверждения
+
+4) Docker Compose (обязательные контейнеры)
+
+Сделай docker-compose.yml (или compose.yaml) минимум:
+
+frontend (nginx или dev/prod режим)
+
+backend (API)
+
+worker (scheduler + ansible runner)
+
+db (postgres)
+
+опционально: redis (если очередь задач)
+
+reverse-proxy (опционально)
+
+Добавь:
+
+миграции при старте
+
+.env.example
+
+volumes для ansible workspace и хранения артефактов
+
+5) Каталог проекта (предложить и реализовать)
+
+Пример ориентира:
+
+/apps/backend
+
+/apps/frontend
+
+/apps/worker
+
+/deploy/compose
+
+/docs (roadmap, checklist, ADR, diagrams)
+
+/scripts (bootstrap, lint, test)
+
+6) Roadmap и чек-листы (обязательный формат вывода)
+
+Сразу создай docs/ROADMAP.md и docs/CHECKLISTS.md:
+
+Roadmap разбить на фазы:
+
+Bootstrap + Auth + UI shell
+
+Hosts CRUD + status checks
+
+SSH terminal
+
+Groups static/dynamic
+
+Secrets vault + integration
+
+Ansible playbooks + runs + history + schedules
+
+Hardening: RBAC, audit, tests, docs polish
+
+Для каждого пункта — чек-лист задач с [ ] / [x]
+
+Вести прогресс прямо в документах
+
+7) Требования к качеству кода и выводу агента
+
+Ты обязан:
+
+писать чистый код, соблюдать линтинг/форматирование
+
+тщательно документировать модули и публичные API
+
+добавлять комментарии там, где важно “почему”, а не “что”
+
+выдавать поэтапные коммиты (описательно) или хотя бы этапы реализации
+
+каждую сложную часть сопровождать объяснением (коротко) и ссылкой на doc файл
+
+8) Итоговые артефакты, которые ты должен создать
+
+Полный репозиторий со всем кодом
+
+docker compose для запуска
+
+документация (README + docs/*)
+
+готовый admin dashboard UI со страницами:
+
+Dashboard (overview)
+
+Hosts
+
+Host details (Terminal tab)
+
+Groups
+
+Automation (Playbooks, Runs, Schedules)
+
+Secrets
+
+Settings (Auth/RBAC basic)
+
+API swagger/openapi (если FastAPI — автоматически)
+
+9) Первый шаг: план проекта
+
+Начни с:
+
+Выбор стека и обоснование.
+
+ER-диаграмма (текстом) и список сущностей.
+
+API endpoints (черновой список).
+
+Структура папок.
+
+Roadmap + чек-листы.
+
+После этого — реализация по фазам.
+
+Важные ограничения
+
+Никаких “заглушек навсегда”: допускаются временные mock-реализации только в фазе bootstrap, но потом заменить на рабочие.
+
+UX для Ansible и Secrets должен быть “продуманным и удобным”, а не просто CRUD.
+
+Всё должно запускаться через Docker Compose.
+
+Начинай работу.
+
+Если хочешь, могу сразу сделать вторую версию промта (короче, “в 20 строк”) или версию, заточенную под конкретный стек (например строго FastAPI + React + Celery + ansible-runner).

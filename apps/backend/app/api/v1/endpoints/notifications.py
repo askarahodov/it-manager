@@ -6,12 +6,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.deps import get_current_project_id, get_current_user, get_db
 from app.api.v1.schemas.notifications import (
+    NotificationEmitRequest,
     NotificationEndpointCreate,
     NotificationEndpointRead,
     NotificationEndpointUpdate,
 )
 from app.db.models import NotificationEndpoint
 from app.services.audit import audit_log
+from app.services.notifications import notify_event
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -116,4 +118,16 @@ async def delete_endpoint(
         entity_id=endpoint_id,
         meta={"name": endpoint.name, "type": endpoint.type},
     )
+    return None
+
+
+@router.post("/emit", status_code=status.HTTP_204_NO_CONTENT)
+async def emit_notification(
+    payload: NotificationEmitRequest,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+    project_id: int = Depends(get_current_project_id),
+):
+    _require_admin(user)
+    await notify_event(db, project_id=project_id, event=payload.event, payload=payload.payload)
     return None

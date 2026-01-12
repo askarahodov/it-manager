@@ -102,9 +102,14 @@
 
 - [x] Webhook endpoints: CRUD + выбор событий.
 
+## Secrets: Notifications (UI)
+
+- [x] События `secret.expiring` и `secret.rotated` доступны для webhook.
+
 ## SSH Sessions (UI)
 
 - [x] Отображение метаданных SSH-сессий на карточке хоста.
+- [x] Просмотр полной записи (transcript) при включённом флаге записи.
 
 ## Remote Actions (UI)
 

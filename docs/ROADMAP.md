@@ -79,14 +79,14 @@
 
 ## Фаза 12: Secrets Vault — Enterprise
 - [x] secret rotation (manual) + политика интервала
-- [ ] secret rotation (scheduled) + фоновые задачи
-- [ ] уведомления: expiring soon / rotated
+- [x] secret rotation (scheduled) + фоновые задачи
+- [x] уведомления: expiring soon / rotated
 - [ ] интеграция rotation с SSH passwords/API tokens (MVP)
 - [ ] dynamic secrets (опционально): TTL creds + auto revoke
 
 ## Фаза 13: SSH & Remote Operations
 - [x] SSH session recording (metadata): duration/user/host/success-error
-- [ ] full session recording (опционально): флаг + предупреждение + хранение
+- [x] full session recording (опционально): флаг + предупреждение + хранение
 - [x] remote actions (reboot/restart service/fetch logs/upload file) через ansible ad-hoc
 
 ## Фаза 14: UI/UX как у зрелого продукта

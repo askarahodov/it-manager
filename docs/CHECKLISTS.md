@@ -80,14 +80,14 @@
 
 ### Secrets Enterprise
 - [x] rotation policies (manual) + интервалы
-- [ ] rotation policies (scheduled) + фоновые задачи
+- [x] rotation policies (scheduled) + фоновые задачи
 - [ ] интеграции rotation (SSH password / API token)
-- [ ] уведомления: expiring soon / rotated
+- [x] уведомления: expiring soon / rotated
 - [ ] dynamic secrets (опционально): TTL creds + auto revoke
 
 ### SSH & Remote Ops
 - [x] SSH session recording (metadata): duration/user/host/success/error
-- [ ] optional full session recording (флаг + предупреждение)
+- [x] optional full session recording (флаг + предупреждение)
 - [x] remote actions: reboot/restart/fetch logs/upload file (через ansible ad-hoc)
 
 ### UI/UX

@@ -32,3 +32,8 @@ class NotificationEndpointRead(NotificationEndpointBase):
     updated_at: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class NotificationEmitRequest(BaseModel):
+    event: str = Field(..., min_length=3)
+    payload: dict[str, object] = Field(default_factory=dict)

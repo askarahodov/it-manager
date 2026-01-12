@@ -39,6 +39,7 @@ class HostBase(BaseModel):
     description: Optional[str] = None
     credential_id: Optional[int] = None
     check_method: HostCheckMethodEnum = HostCheckMethodEnum.tcp
+    record_ssh: bool = False
 
     @field_validator("hostname")
     @classmethod
@@ -61,6 +62,7 @@ class HostUpdate(BaseModel):
     description: Optional[str] = None
     credential_id: Optional[int] = None
     check_method: Optional[HostCheckMethodEnum] = None
+    record_ssh: Optional[bool] = None
 
     @field_validator("hostname")
     @classmethod
@@ -118,6 +120,8 @@ class SshSessionRead(BaseModel):
     duration_seconds: Optional[int] = None
     success: bool
     error: Optional[str] = None
+    transcript: Optional[str] = None
+    transcript_truncated: bool = False
 
     model_config = ConfigDict(from_attributes=True)
 

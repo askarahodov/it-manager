@@ -29,6 +29,7 @@ type Host = {
   health_checked_at?: string | null;
   facts_snapshot?: Record<string, any> | null;
   facts_checked_at?: string | null;
+  record_ssh?: boolean;
 };
 
 type HostHealthRecord = {
@@ -49,6 +50,8 @@ type SshSession = {
   duration_seconds?: number | null;
   success: boolean;
   error?: string | null;
+  transcript?: string | null;
+  transcript_truncated?: boolean;
 };
 
 type HostFormState = {
@@ -62,6 +65,7 @@ type HostFormState = {
   description: string;
   credential_id?: number | "";
   check_method?: "ping" | "tcp" | "ssh";
+  record_ssh?: boolean;
 };
 
 function parseTags(value: string) {
@@ -115,6 +119,7 @@ function HostDetailsPage({ hostId }: { hostId: number }) {
   const [secrets, setSecrets] = useState<SecretOption[]>([]);
   const [healthHistory, setHealthHistory] = useState<HostHealthRecord[]>([]);
   const [sshSessions, setSshSessions] = useState<SshSession[]>([]);
+  const [transcript, setTranscript] = useState<{ open: boolean; session: SshSession | null }>({ open: false, session: null });
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [factsLoading, setFactsLoading] = useState(false);
@@ -147,6 +152,7 @@ function HostDetailsPage({ hostId }: { hostId: number }) {
       description: h.description ?? "",
       credential_id: h.credential_id ?? "",
       check_method: (h as any).check_method ?? "tcp",
+      record_ssh: Boolean(h.record_ssh),
     });
   };
 
@@ -199,17 +205,18 @@ function HostDetailsPage({ hostId }: { hostId: number }) {
 
   const handleChange = (event: ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     if (!form) return;
-    const { name, value } = event.target;
+    const { name, value, type } = event.target;
+    const nextValue = type === "checkbox" ? (event.target as HTMLInputElement).checked : value;
     setForm((prev) => {
       if (!prev) return prev;
       return {
         ...prev,
         [name]:
           name === "port"
-            ? Number(value)
+            ? Number(nextValue)
             : name === "credential_id"
-              ? value === "" ? "" : Number(value)
-              : value,
+              ? nextValue === "" ? "" : Number(nextValue)
+              : nextValue,
       } as HostFormState;
     });
   };
@@ -477,6 +484,15 @@ function HostDetailsPage({ hostId }: { hostId: number }) {
                   </select>
                   <span className="form-helper">ssh использует credential (password/private_key).</span>
                 </label>
+                <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <input name="record_ssh" type="checkbox" checked={Boolean(form.record_ssh)} onChange={handleChange} disabled={!canManageHosts} />
+                  Записывать SSH сессии (полный лог)
+                </label>
+                {form.record_ssh && (
+                  <span className="form-helper">
+                    Внимание: запись включает ввод/вывод терминала. Включайте только при необходимости.
+                  </span>
+                )}
                 <div className="form-actions">
                   <button type="submit" className="primary-button" disabled={!canManageHosts || saving}>
                     {saving ? "Сохраняем..." : "Сохранить"}
@@ -507,6 +523,7 @@ function HostDetailsPage({ hostId }: { hostId: number }) {
                 <div><strong>Время последнего run:</strong> {host.last_run_at ? new Date(host.last_run_at).toLocaleString() : "—"}</div>
                 <div><strong>Метод проверки:</strong> {(host as any).check_method ?? "tcp"}</div>
                 <div><strong>Credential ID:</strong> {host.credential_id ?? "—"}</div>
+                <div><strong>SSH запись:</strong> {host.record_ssh ? "enabled" : "disabled"}</div>
                 <div><strong>Health snapshot:</strong> {host.health_checked_at ? new Date(host.health_checked_at).toLocaleString() : "—"}</div>
                 {host.health_snapshot ? (
                   <div className="stack">
@@ -598,6 +615,7 @@ function HostDetailsPage({ hostId }: { hostId: number }) {
                           <th>Actor</th>
                           <th>IP</th>
                           <th>OK</th>
+                          <th>Запись</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -608,6 +626,19 @@ function HostDetailsPage({ hostId }: { hostId: number }) {
                             <td>{row.actor}</td>
                             <td>{row.source_ip ?? "—"}</td>
                             <td>{row.success ? "yes" : "no"}</td>
+                            <td>
+                              {row.transcript ? (
+                                <button
+                                  type="button"
+                                  className="ghost-button"
+                                  onClick={() => setTranscript({ open: true, session: row })}
+                                >
+                                  Просмотреть
+                                </button>
+                              ) : (
+                                "—"
+                              )}
+                            </td>
                           </tr>
                         ))}
                       </tbody>
@@ -693,6 +724,30 @@ function HostDetailsPage({ hostId }: { hostId: number }) {
             disabled={!canSsh || !host || host.status === "offline" || !host.credential_id}
             height={560}
           />
+        </div>
+      )}
+
+      {transcript.open && transcript.session && (
+        <div className="modal-overlay">
+          <div className="modal full">
+            <div className="modal-header">
+              <div>
+                <strong>SSH запись: {transcript.session.actor}</strong>
+                <div className="form-helper">
+                  {new Date(transcript.session.started_at).toLocaleString()}
+                  {transcript.session.transcript_truncated ? " · truncated" : ""}
+                </div>
+              </div>
+              <div className="row-actions">
+                <button type="button" className="ghost-button" onClick={() => setTranscript({ open: false, session: null })}>
+                  Закрыть
+                </button>
+              </div>
+            </div>
+            <div className="panel" style={{ flex: 1, overflow: "auto" }}>
+              <pre style={{ whiteSpace: "pre-wrap" }}>{transcript.session.transcript}</pre>
+            </div>
+          </div>
         </div>
       )}
     </div>

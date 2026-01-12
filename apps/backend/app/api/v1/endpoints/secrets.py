@@ -7,15 +7,43 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.deps import get_current_project_id, get_db, require_permission
-from app.api.v1.schemas.secrets import SecretCreate, SecretRead, SecretReveal, SecretRevealInternal, SecretRotateRequest, SecretScope, SecretUpdate
+from app.api.v1.schemas.runs import RunRead
+from app.api.v1.schemas.secrets import (
+    SecretCreate,
+    SecretRead,
+    SecretReveal,
+    SecretRevealInternal,
+    SecretRotateApplyRequest,
+    SecretRotateRequest,
+    SecretScope,
+    SecretUpdate,
+)
 from app.core.rbac import Permission
-from app.db.models import Host, Secret
+from app.db.models import ApprovalRequest, ApprovalStatus, Host, JobRun, JobStatus, Playbook, Secret, SecretType
 from app.services.audit import audit_log
 from app.services.encryption import decrypt_value, encrypt_value
+from app.services.notifications import notify_event
+from app.services.queue import enqueue_run
+from app.services.access import host_access_clause
 from app.services.triggers import dispatch_secret_triggers
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+ROTATE_PASSWORD_PLAYBOOK_NAME = "_rotate_passwords"
+ROTATE_PASSWORD_PLAYBOOK_CONTENT = """---
+- name: rotate passwords
+  hosts: all
+  gather_facts: false
+  become: true
+  tasks:
+    - name: set password for ssh user
+      no_log: true
+      ansible.builtin.shell: |
+        echo "{{ ansible_user }}:{{ rotation_new_password }}" | chpasswd
+      args:
+        warn: false
+"""
 
 
 def _compute_next_rotation(last_rotated_at: datetime | None, interval_days: int | None) -> datetime | None:
@@ -23,6 +51,30 @@ def _compute_next_rotation(last_rotated_at: datetime | None, interval_days: int 
         return None
     base = last_rotated_at or datetime.utcnow()
     return base + timedelta(days=interval_days)
+
+
+async def _ensure_rotation_playbook(db: AsyncSession, project_id: int, actor_id: int | None) -> Playbook:
+    query = await db.execute(
+        select(Playbook)
+        .where(Playbook.project_id == project_id)
+        .where(Playbook.name == ROTATE_PASSWORD_PLAYBOOK_NAME)
+    )
+    playbook = query.scalar_one_or_none()
+    if playbook:
+        return playbook
+    playbook = Playbook(
+        project_id=project_id,
+        name=ROTATE_PASSWORD_PLAYBOOK_NAME,
+        description="System playbook: rotate ssh passwords",
+        stored_content=ROTATE_PASSWORD_PLAYBOOK_CONTENT,
+        variables={},
+        inventory_scope=[],
+        created_by=actor_id,
+    )
+    db.add(playbook)
+    await db.commit()
+    await db.refresh(playbook)
+    return playbook
 
 
 @router.get("/", response_model=list[SecretRead])
@@ -34,6 +86,7 @@ async def list_secrets(
     query = await db.execute(
         select(Secret)
         .where(or_(Secret.project_id == project_id, Secret.project_id.is_(None)))
+        .where(or_(Secret.tags["system"].astext.is_(None), Secret.tags["system"].astext != "rotation_pending"))
         .order_by(Secret.name)
     )
     return query.scalars().all()
@@ -198,6 +251,133 @@ async def rotate_secret(
     )
     await dispatch_secret_triggers(db, secret, project_id)
     return secret
+
+
+@router.post("/{secret_id}/rotate-apply", response_model=RunRead, status_code=status.HTTP_201_CREATED)
+async def rotate_secret_apply(
+    secret_id: int,
+    payload: SecretRotateApplyRequest,
+    db: AsyncSession = Depends(get_db),
+    principal=Depends(require_permission(Permission.secrets_write)),
+    project_id: int = Depends(get_current_project_id),
+):
+    secret = await db.get(Secret, secret_id)
+    if not secret:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Секрет не найден")
+    if secret.project_id is not None and secret.project_id != project_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Секрет не найден")
+    if secret.type != SecretType.password:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Ротация применима только к password секретам")
+
+    host_query = (
+        select(Host)
+        .where(Host.project_id == project_id)
+        .where(Host.credential_id == secret.id)
+        .where(host_access_clause(principal))
+    )
+    hosts_result = await db.execute(host_query)
+    hosts = hosts_result.scalars().all()
+    if not hosts:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Секрет не привязан к хостам; используйте обычную ротацию",
+        )
+
+    encrypted_new = encrypt_value(payload.value)
+    encrypted_passphrase = encrypt_value(payload.passphrase) if payload.passphrase else None
+    temp_secret = Secret(
+        project_id=project_id,
+        name=f"_rotation_pending_{secret.id}_{int(datetime.utcnow().timestamp())}",
+        type=secret.type,
+        scope=secret.scope,
+        description="Rotation helper secret",
+        tags={"system": "rotation_pending", "target_secret_id": str(secret.id)},
+        encrypted_value=encrypted_new,
+        encrypted_passphrase=encrypted_passphrase,
+        created_by=principal.id,
+    )
+    db.add(temp_secret)
+    await db.commit()
+    await db.refresh(temp_secret)
+
+    playbook = await _ensure_rotation_playbook(db, project_id, principal.id)
+
+    snapshot_hosts = [
+        {
+            "id": host.id,
+            "name": host.name,
+            "hostname": host.hostname,
+            "port": host.port,
+            "username": host.username,
+            "credential_id": host.credential_id,
+        }
+        for host in hosts
+    ]
+    extra_vars = {"rotation_new_password": f"{{{{ secret:{temp_secret.id} }}}}"}
+    run = JobRun(
+        project_id=project_id,
+        playbook_id=playbook.id,
+        triggered_by=principal.email or "user",
+        status=JobStatus.pending,
+        target_snapshot={
+            "hosts": snapshot_hosts,
+            "group_ids": [],
+            "host_ids": [host.id for host in hosts],
+            "extra_vars": extra_vars,
+            "dry_run": False,
+            "rotation": {"target_secret_id": secret.id, "temp_secret_id": temp_secret.id},
+            "params_before": {},
+            "params_after": {"rotation_new_password": "***", "rotation_target_secret_id": secret.id},
+        },
+        logs="",
+    )
+    db.add(run)
+    await db.commit()
+    await db.refresh(run)
+
+    requires_approval = any(host.environment == "prod" for host in hosts)
+    if requires_approval:
+        approval = ApprovalRequest(
+            project_id=project_id,
+            run_id=run.id,
+            requested_by=principal.id,
+            status=ApprovalStatus.pending,
+        )
+        db.add(approval)
+        run.target_snapshot["approval_status"] = "pending"
+        await db.commit()
+        await db.refresh(approval)
+        run.target_snapshot["approval_id"] = approval.id
+        await db.commit()
+        await audit_log(
+            db,
+            project_id=project_id,
+            actor=principal.email,
+            actor_role=str(principal.role.value),
+            action="secret.rotate_apply_requires_approval",
+            entity_type="run",
+            entity_id=run.id,
+            meta={"secret_id": secret.id, "approval_id": approval.id},
+        )
+        await notify_event(
+            db,
+            project_id=project_id,
+            event="approval.requested",
+            payload={"approval_id": approval.id, "run_id": run.id, "secret_id": secret.id},
+        )
+    else:
+        await enqueue_run(run.id, project_id=project_id)
+        await audit_log(
+            db,
+            project_id=project_id,
+            actor=principal.email,
+            actor_role=str(principal.role.value),
+            action="secret.rotate_apply",
+            entity_type="run",
+            entity_id=run.id,
+            meta={"secret_id": secret.id},
+        )
+    return run
 
 
 @router.post("/{secret_id}/reveal", response_model=SecretReveal)

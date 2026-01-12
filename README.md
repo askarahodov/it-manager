@@ -78,6 +78,7 @@ E2E тесты живут в `apps/frontend/tests-e2e` и поднимают в�
 - Advanced host health: snapshot (uptime/load/memory/disk) + history + facts через Ansible.
 - Группы хостов: static/dynamic, rule engine, пересчёт состава (воркером и вручную).
 - Vault-секреты (AES-GCM) с `/api/v1/secrets` и `/api/v1/secrets/{id}/reveal`, включая тип `private_key` с passphrase, scope `global`, `expires_at`, rotation interval и ручную ротацию (`/api/v1/secrets/{id}/rotate`).
+- Плановая ротация секретов (password/token) выполняется воркером по интервалу (`WORKER_ROTATION_POLL_SECONDS`).
 - Automation: CRUD плейбуков, playbook templates/instances, запуск вручную/по расписанию, история и live-логи (SSE).
 - Approval flow для prod запусков: requester/approver, diff параметров, UI approvals.
 - Event-driven triggers: webhook, host created/tags changed, secret rotated.
@@ -90,6 +91,7 @@ E2E тесты живут в `apps/frontend/tests-e2e` и поднимают в�
 - React/Vite страницы Groups + Secrets + Settings (login/logout, reveal для admin, audit log).
 - Страница Terminal с WebSocket-подключением и xterm.js; backend терминал использует SSH с паролем или приватным ключом + passphrase (через Secret).
 - SSH session recording (metadata): длительность, актор, IP, статус.
+- SSH full recording (опционально): флаг записи + хранение transcript.
 - Remote actions: reboot/restart service/fetch logs/upload file через Ansible.
 - Миграции Alembic: backend применяет `alembic upgrade head` при старте контейнера.
 - Healthcheck: `GET /healthz`.

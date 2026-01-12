@@ -64,6 +64,7 @@ const NOTIFICATION_EVENTS = [
   "approval.rejected",
   "host.offline",
   "secret.rotated",
+  "secret.expiring",
 ] as const;
 
 function SettingsPage() {
@@ -117,6 +118,7 @@ function SettingsPage() {
   const [notificationLoading, setNotificationLoading] = useState(false);
   const [notifEditId, setNotifEditId] = useState<number | null>(null);
   const [notifName, setNotifName] = useState("");
+  const [notifType, setNotifType] = useState("webhook");
   const [notifUrl, setNotifUrl] = useState("");
   const [notifSecret, setNotifSecret] = useState("");
   const [notifEnabled, setNotifEnabled] = useState(true);
@@ -301,6 +303,7 @@ function SettingsPage() {
   const resetNotificationForm = () => {
     setNotifEditId(null);
     setNotifName("");
+    setNotifType("webhook");
     setNotifUrl("");
     setNotifSecret("");
     setNotifEnabled(true);
@@ -313,7 +316,7 @@ function SettingsPage() {
     try {
       const payload = {
         name: notifName,
-        type: "webhook",
+        type: notifType,
         url: notifUrl,
         secret: notifSecret || null,
         enabled: notifEnabled,
@@ -345,6 +348,7 @@ function SettingsPage() {
   const editNotification = (item: NotificationEndpoint) => {
     setNotifEditId(item.id);
     setNotifName(item.name);
+    setNotifType(item.type);
     setNotifUrl(item.url);
     setNotifSecret(item.secret ?? "");
     setNotifEnabled(Boolean(item.enabled));
@@ -1176,6 +1180,7 @@ function SettingsPage() {
                   <thead>
                     <tr>
                       <th>Название</th>
+                      <th>Тип</th>
                       <th>URL</th>
                       <th>События</th>
                       <th>Статус</th>
@@ -1186,6 +1191,7 @@ function SettingsPage() {
                     {notificationEndpoints.map((item) => (
                       <tr key={item.id}>
                         <td>{item.name}</td>
+                        <td>{item.type}</td>
                         <td className="truncate">{item.url}</td>
                         <td>{item.events?.length ? item.events.join(", ") : "all"}</td>
                         <td>{item.enabled ? "enabled" : "disabled"}</td>
@@ -1216,8 +1222,19 @@ function SettingsPage() {
                   <input value={notifName} onChange={(e) => setNotifName(e.target.value)} required />
                 </label>
                 <label>
+                  Тип
+                  <select value={notifType} onChange={(e) => setNotifType(e.target.value)}>
+                    <option value="webhook">webhook</option>
+                    <option value="slack">slack</option>
+                    <option value="telegram">telegram</option>
+                    <option value="email">email</option>
+                  </select>
+                  <span className="form-helper">Slack/Telegram используют URL webhook; email — адрес получателя.</span>
+                </label>
+                <label>
                   URL
                   <input value={notifUrl} onChange={(e) => setNotifUrl(e.target.value)} required />
+                  {notifType === "email" && <span className="form-helper">Пример: user@example.com</span>}
                 </label>
                 <label>
                   Secret (опционально)

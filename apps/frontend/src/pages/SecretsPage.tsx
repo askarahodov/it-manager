@@ -88,8 +88,10 @@ function SecretsPage() {
   const [revealValue, setRevealValue] = useState<string | null>(null);
   const [editId, setEditId] = useState<number | null>(null);
   const [rotateId, setRotateId] = useState<number | null>(null);
+  const [rotateTarget, setRotateTarget] = useState<Secret | null>(null);
   const [rotateValue, setRotateValue] = useState("");
   const [rotatePassphrase, setRotatePassphrase] = useState("");
+  const [rotateApply, setRotateApply] = useState(false);
 
   const isAdmin = user?.role === "admin";
   const canReveal = isAdmin;
@@ -263,8 +265,10 @@ function SecretsPage() {
 
   const startRotate = (secret: Secret) => {
     setRotateId(secret.id);
+    setRotateTarget(secret);
     setRotateValue("");
     setRotatePassphrase("");
+    setRotateApply(secret.type === "password");
   };
 
   const performRotate = async () => {
@@ -278,6 +282,25 @@ function SecretsPage() {
     try {
       const payload: Record<string, unknown> = { value: rotateValue };
       if (rotatePassphrase) payload.passphrase = rotatePassphrase;
+      if (rotateApply && rotateTarget?.type === "password") {
+        const run = await apiFetch<{ id: number }>(`/api/v1/secrets/${rotateId}/rotate-apply`, {
+          method: "POST",
+          token,
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        setRotateId(null);
+        setRotateTarget(null);
+        setRotateApply(false);
+        setRotateValue("");
+        setRotatePassphrase("");
+        pushToast({
+          title: "Ротация запущена",
+          description: `Run #${run.id} создан для применения на хосты`,
+          variant: "success",
+        });
+        return;
+      }
       const rotated = await apiFetch<Secret>(`/api/v1/secrets/${rotateId}/rotate`, {
         method: "POST",
         token,
@@ -286,6 +309,8 @@ function SecretsPage() {
       });
       setSecrets((prev) => prev.map((s) => (s.id === rotated.id ? rotated : s)));
       setRotateId(null);
+      setRotateTarget(null);
+      setRotateApply(false);
       setRotateValue("");
       setRotatePassphrase("");
       pushToast({ title: "Секрет ротирован", description: rotated.name, variant: "success" });
@@ -546,11 +571,30 @@ function SecretsPage() {
                 Passphrase (если private_key)
                 <input value={rotatePassphrase} onChange={(e) => setRotatePassphrase(e.target.value)} disabled={!isAdmin} />
               </label>
+              {rotateTarget?.type === "password" && (
+                <label className="checkbox-row">
+                  <input
+                    type="checkbox"
+                    checked={rotateApply}
+                    onChange={(e) => setRotateApply(e.target.checked)}
+                    disabled={!isAdmin}
+                  />
+                  <span>Применить ротацию на хостах, которые используют этот секрет</span>
+                </label>
+              )}
               <div className="row-actions">
                 <button type="button" className="primary-button" onClick={performRotate} disabled={!isAdmin}>
                   Ротировать
                 </button>
-                <button type="button" className="ghost-button" onClick={() => setRotateId(null)}>
+                <button
+                  type="button"
+                  className="ghost-button"
+                  onClick={() => {
+                    setRotateId(null);
+                    setRotateTarget(null);
+                    setRotateApply(false);
+                  }}
+                >
                   Отмена
                 </button>
               </div>

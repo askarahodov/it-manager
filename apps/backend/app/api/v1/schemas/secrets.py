@@ -64,3 +64,8 @@ class SecretRevealInternal(BaseModel):
 class SecretRotateRequest(BaseModel):
     value: str = Field(..., min_length=1)
     passphrase: Optional[str] = None
+
+
+class SecretRotateApplyRequest(BaseModel):
+    value: str = Field(..., min_length=1)
+    passphrase: Optional[str] = None

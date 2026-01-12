@@ -115,6 +115,7 @@ class Host(Base):
     health_checked_at = Column(DateTime, nullable=True)
     facts_snapshot = Column(JSONB, nullable=True)
     facts_checked_at = Column(DateTime, nullable=True)
+    record_ssh = Column(Boolean, default=False, nullable=False)
     credential_id = Column(Integer, ForeignKey("secrets.id"), nullable=True)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, onupdate=datetime.utcnow())
@@ -146,6 +147,8 @@ class SshSession(Base):
     duration_seconds = Column(Integer, nullable=True)
     success = Column(Boolean, default=True, nullable=False)
     error = Column(Text, nullable=True)
+    transcript = Column(Text, nullable=True)
+    transcript_truncated = Column(Boolean, default=False, nullable=False)
 
 
 class GroupType(str, enum.Enum):

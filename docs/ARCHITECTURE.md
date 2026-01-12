@@ -5,9 +5,11 @@
 - **ORM/миграции**: SQLAlchemy + Alembic — стандартный стек для PostgreSQL, позволяет точно моделировать домен и выполнять безопасные миграции.
 - **Frontend**: React + TypeScript + Vite + кастомная библиотека компонентов в стиле Admin Dashboard (Сторонние компоненты можно заменить на готовые UI-kit, например, shadcn/ui, Mantine, Ant Design).
 - **SSH в браузере**: WebSocket + xterm.js, FastAPI + WebSocket рядом с asyncssh.
-- **Jobs/Scheduler**: отдельный воркер на Python (asyncio loops) + Redis очередь, запуск `ansible-playbook` в контейнере воркера; расписания (interval/cron) выполняются воркером.
+- **Jobs/Scheduler**: отдельный воркер на Python (asyncio loops) + Redis очередь, запуск `ansible-playbook`/ansible-runner; расписания (interval/cron), ротации секретов и фоновые проверки выполняются воркером.
 - **Secrets**: значения шифруются AES-GCM и хранятся в базе; master key из env (ENV_MASTER_KEY), рассекречивание только для авторизованных действий; поддерживаются типы password/token/text и private_key с passphrase.
-- **Auth**: JWT на основе FastAPI Users или свой модуль; RBAC роли (admin/user).
+- **Secrets rotation**: manual + scheduled rotation (password/token) через воркер, поддержка expires_at/intervals.
+- **Notifications**: outbound webhook endpoints с подпиской на события (run/approval/host/secret).
+- **Auth**: JWT + RBAC роли (admin/operator/viewer/automation-only).
 - **Документация/Observability**: OpenAPI + healthcheck + structured logging.
 
 ## ER-диаграмма (текст)
@@ -16,24 +18,35 @@ User 1---* Playbook
 User 1---* JobRun
 User 1---* Secret
 GroupType (static/dynamic) + Group 1---* Host (через association)
-Host *---1 Credential/Sсret
+Host *---1 Credential/Secret
+Host 1---* HostHealthCheck
+Host 1---* SshSession
 Playbook *---* Group (через PlaybookTarget)
 Playbook *---* Host
+Playbook 1---* PlaybookTemplate
+PlaybookTemplate 1---* PlaybookInstance
+Playbook 1---* PlaybookTrigger
 JobRun *---1 Playbook
 JobRun *---1 InventorySnapshot
 Secret *---* PlaybookVariable
+NotificationEndpoint (webhook) -> события по проекту
 ```
 
 Сущности:
 - **User**: id, email, password_hash, role, created_at
-- **Host**: id, name, hostname, port, os_type, environment, tags, description, status, last_check, check_method (ping/tcp/ssh)
+- **Host**: id, name, hostname, port, os_type, environment, tags, description, status, last_check, check_method (ping/tcp/ssh), health_snapshot/facts_snapshot, record_ssh
 - **Group**: id, name, type, rule_json (для dynamic), hosts (m2m)
-- **Playbook**: id, name, description, repo_path, stored_content, default_vars, owner_id
+- **Playbook**: id, name, description, repo_path, stored_content, default_vars, owner_id, webhook_token
+- **PlaybookTemplate/Instance**: шаблоны/инстансы для параметризации.
+- **PlaybookTrigger**: автозапуск по событиям (host_created/host_tags_changed/secret_rotated).
 - **PlaybookTarget**: связывает playbook с host/group + snapshot
-- **JobRun**: id, playbook_id, triggered_by, status, logs, started_at, finished_at, target_snapshot
-- **Secret**: id, name, type, encrypted_value, metadata, scope, tags, created_by
+- **JobRun**: id, playbook_id, triggered_by, status, logs, started_at, finished_at, target_snapshot (approval/facts/actions)
+- **Secret**: id, name, type, encrypted_value, scope, tags, expires_at, rotation_interval, last/next rotate
 - **CredentialReference**: связь Host->Secret (credential)
-- **AutomationSchedule**: playbook_id, cron, enabled
+- **AutomationSchedule**: playbook_id, cron, enabled (в variables.__schedule)
+- **ApprovalRequest**: approvals для prod запусков
+- **SshSession**: метаданные + transcript (опционально)
+- **NotificationEndpoint**: webhooks для уведомлений
 
 ## API (черновой)
 - `POST /auth/login` — получить JWT
@@ -44,6 +57,7 @@ Secret *---* PlaybookVariable
 - `PUT /hosts/{id}`
 - `DELETE /hosts/{id}`
 - `POST /hosts/{id}/status-check`
+- `POST /hosts/{id}/actions` — remote actions (reboot/restart/fetch logs/upload file)
 - `WebSocket /hosts/{id}/terminal` — ssh tunnel (пароль или приватный ключ)
 - `GET /groups`, `POST /groups`, `PUT /groups/{id}`, `DELETE /groups/{id}`, `POST /groups/{id}/recalculate`
 - `GET /playbooks`, `POST /playbooks`, `GET /playbooks/{id}`, `PUT /playbooks/{id}`, `DELETE /playbooks/{id}`
@@ -51,6 +65,8 @@ Secret *---* PlaybookVariable
 - `GET /runs`, `GET /runs/{id}`
 - `POST /runs/{id}/logs` (streaming/ws)
 - `GET /secrets`, `POST /secrets`, `PUT /secrets/{id}`, `DELETE /secrets/{id}`, `POST /secrets/{id}/reveal`
+- `POST /secrets/{id}/rotate`
+- `GET /notifications`, `POST /notifications`, `PUT /notifications/{id}`, `DELETE /notifications/{id}`
 - `GET /health`, `GET /metrics`
 
 ## Структура каталогов

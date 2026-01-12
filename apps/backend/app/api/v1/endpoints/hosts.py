@@ -820,6 +820,26 @@ async def host_terminal(
     db.add(session)
     await db.commit()
     await db.refresh(session)
+    recording_enabled = bool(getattr(host, "record_ssh", False))
+    transcript_parts: list[str] = []
+    transcript_len = 0
+    transcript_truncated = False
+    max_transcript = 200_000
+
+    def _append_transcript(prefix: str, text: str) -> None:
+        nonlocal transcript_len, transcript_truncated
+        if not recording_enabled or transcript_truncated:
+            return
+        chunk = f"{prefix} {text}"
+        available = max_transcript - transcript_len
+        if available <= 0:
+            transcript_truncated = True
+            return
+        if len(chunk) > available:
+            chunk = chunk[:available]
+            transcript_truncated = True
+        transcript_parts.append(chunk)
+        transcript_len += len(chunk)
     password: Optional[str] = None
     private_key: Optional[str] = None
     passphrase: Optional[str] = None
@@ -854,6 +874,14 @@ async def host_terminal(
         )
     except Exception as exc:
         logger.exception("SSH connect error host_id=%s: %s", host_id, exc)
+        session.success = False
+        session.error = str(exc)
+        session.finished_at = datetime.utcnow()
+        session.duration_seconds = int((session.finished_at - session.started_at).total_seconds())
+        if recording_enabled:
+            session.transcript = "".join(transcript_parts)
+            session.transcript_truncated = transcript_truncated
+        await db.commit()
         await websocket.send_text(f"SSH ошибка: {exc}\n")
         await audit_log(
             db,
@@ -875,6 +903,14 @@ async def host_terminal(
         await process.stdin.drain()
     except Exception as exc:  # noqa: BLE001
         logger.exception("Не удалось открыть shell host_id=%s: %s", host_id, exc)
+        session.success = False
+        session.error = str(exc)
+        session.finished_at = datetime.utcnow()
+        session.duration_seconds = int((session.finished_at - session.started_at).total_seconds())
+        if recording_enabled:
+            session.transcript = "".join(transcript_parts)
+            session.transcript_truncated = transcript_truncated
+        await db.commit()
         await websocket.send_text(f"Не удалось открыть shell: {exc}\n")
         await websocket.close(code=status.WS_1011_INTERNAL_ERROR)
         conn.close()
@@ -888,9 +924,13 @@ async def host_terminal(
                     break
                 # encoding=None => bytes
                 if isinstance(data, (bytes, bytearray)):
-                    await websocket.send_text(bytes(data).decode(errors="ignore"))
+                    text = bytes(data).decode(errors="ignore")
+                    _append_transcript("OUT:", text)
+                    await websocket.send_text(text)
                 else:
-                    await websocket.send_text(str(data))
+                    text = str(data)
+                    _append_transcript("OUT:", text)
+                    await websocket.send_text(text)
         except Exception as exc:  # noqa: BLE001
             logger.debug("stdout/stderr stream closed: %s", exc)
 
@@ -916,6 +956,7 @@ async def host_terminal(
                             continue
                 # обычные данные терминала
                 data = message.encode("utf-8", errors="ignore")
+                _append_transcript("IN:", message)
                 process.stdin.write(data)
                 await process.stdin.drain()
         except WebSocketDisconnect:
@@ -951,6 +992,9 @@ async def host_terminal(
     if session_error:
         session.success = False
         session.error = session_error
+    if recording_enabled:
+        session.transcript = "".join(transcript_parts)
+        session.transcript_truncated = transcript_truncated
     await db.commit()
     await audit_log(
         db,

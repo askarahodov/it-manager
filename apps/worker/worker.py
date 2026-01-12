@@ -16,6 +16,7 @@ import base64
 import hashlib
 import hmac
 import json
+import secrets
 import logging
 import os
 import queue
@@ -67,6 +68,7 @@ class WorkerContext:
     redis_url: str
     recompute_interval: int
     schedule_poll_seconds: int
+    rotation_poll_seconds: int
     run_timeout_seconds: int
     run_max_retries: int
     run_stale_seconds: int
@@ -81,6 +83,7 @@ def _ctx_from_env() -> WorkerContext:
         redis_url=os.environ.get("REDIS_URL", "redis://redis:6379/0"),
         recompute_interval=int(os.environ.get("WORKER_RECOMPUTE_INTERVAL_SECONDS", "60")),
         schedule_poll_seconds=int(os.environ.get("WORKER_SCHEDULE_POLL_SECONDS", "10")),
+        rotation_poll_seconds=int(os.environ.get("WORKER_ROTATION_POLL_SECONDS", "60")),
         run_timeout_seconds=int(os.environ.get("WORKER_RUN_TIMEOUT_SECONDS", "1800")),
         run_max_retries=int(os.environ.get("WORKER_RUN_MAX_RETRIES", "3")),
         run_stale_seconds=int(os.environ.get("WORKER_RUN_STALE_SECONDS", "3600")),
@@ -125,6 +128,21 @@ async def _backend_get(
     if project_id is not None:
         headers["X-Project-Id"] = str(int(project_id))
     return await client.get(url, headers=headers)
+
+
+async def _backend_delete(
+    client: httpx.AsyncClient,
+    token: str,
+    path: str,
+    *,
+    request_id: str | None = None,
+    project_id: int | None = None,
+) -> httpx.Response:
+    url = client.base_url.join(path)
+    headers = {"Authorization": f"Bearer {token}", "X-Request-Id": request_id or _make_request_id("worker")}
+    if project_id is not None:
+        headers["X-Project-Id"] = str(int(project_id))
+    return await client.delete(url, headers=headers)
 
 
 async def _list_projects(client: httpx.AsyncClient, token: str) -> list[dict[str, Any]]:
@@ -320,6 +338,112 @@ async def schedule_runs_loop(ctx: WorkerContext) -> None:
 
             await asyncio.sleep(ctx.schedule_poll_seconds)
 
+
+async def secret_rotation_loop(ctx: WorkerContext) -> None:
+    logger.info("Secret rotation loop started poll=%ss", ctx.rotation_poll_seconds)
+    await asyncio.sleep(5)
+    r = redis.from_url(ctx.redis_url, decode_responses=True)
+    async with httpx.AsyncClient(base_url=ctx.backend_url, timeout=20) as client:
+        while True:
+            token = _admin_token(ctx.secret_key)
+            now = datetime.utcnow()
+            try:
+                projects = await _list_projects(client, token)
+                for pr in projects:
+                    pid = int(pr.get("id") or 1)
+                    resp = await _backend_get(
+                        client,
+                        token,
+                        "/api/v1/secrets/",
+                        request_id=_make_request_id(f"worker-secrets-p{pid}"),
+                        project_id=pid,
+                    )
+                    if resp.status_code != 200:
+                        logger.warning(
+                            "Secrets list failed project_id=%s status=%s body=%s",
+                            pid,
+                            resp.status_code,
+                            resp.text[:200],
+                        )
+                        continue
+                    for sec in resp.json():
+                        if not isinstance(sec, dict):
+                            continue
+                        sec_id = sec.get("id")
+                        if not sec_id:
+                            continue
+                        expires_at = sec.get("expires_at")
+                        if isinstance(expires_at, str) and expires_at:
+                            exp_dt = None
+                            try:
+                                exp_dt = datetime.fromisoformat(expires_at)
+                            except Exception:
+                                exp_dt = None
+                            if exp_dt and 0 <= (exp_dt - now).total_seconds() <= 7 * 86400:
+                                key = f"itmgr:secret:expiring:{sec_id}:{exp_dt.date().isoformat()}"
+                                if await r.setnx(key, "1"):
+                                    await r.expire(key, 86400)
+                                    await _backend_post(
+                                        client,
+                                        token,
+                                        "/api/v1/notifications/emit",
+                                        json_body={
+                                            "event": "secret.expiring",
+                                            "payload": {"secret_id": sec_id, "name": sec.get("name"), "expires_at": expires_at},
+                                        },
+                                        request_id=_make_request_id(f"worker-secret-expiring-{sec_id}"),
+                                        project_id=pid,
+                                    )
+
+                        interval = sec.get("rotation_interval_days")
+                        if not interval:
+                            continue
+                        next_rotated = sec.get("next_rotated_at")
+                        if isinstance(next_rotated, str) and next_rotated:
+                            try:
+                                next_dt = datetime.fromisoformat(next_rotated)
+                            except Exception:
+                                next_dt = None
+                        else:
+                            next_dt = None
+                        if next_dt and next_dt > now:
+                            continue
+
+                        if sec.get("type") not in {"password", "token"}:
+                            continue
+                        key = f"itmgr:secret:rotate:{sec_id}"
+                        if not await r.setnx(key, "1"):
+                            continue
+                        await r.expire(key, 3600)
+                        new_value = secrets.token_urlsafe(24)
+                        rot = await _backend_post(
+                            client,
+                            token,
+                            f"/api/v1/secrets/{sec_id}/rotate-apply",
+                            json_body={"value": new_value},
+                            request_id=_make_request_id(f"worker-secret-rotate-apply-{sec_id}"),
+                            project_id=pid,
+                        )
+                        if rot.status_code == 400:
+                            rot = await _backend_post(
+                                client,
+                                token,
+                                f"/api/v1/secrets/{sec_id}/rotate",
+                                json_body={"value": new_value},
+                                request_id=_make_request_id(f"worker-secret-rotate-{sec_id}"),
+                                project_id=pid,
+                            )
+                        if rot.status_code not in {200, 201}:
+                            logger.warning(
+                                "Secret rotate failed secret_id=%s status=%s body=%s",
+                                sec_id,
+                                rot.status_code,
+                                rot.text[:200],
+                            )
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("Secret rotation loop error: %s", exc)
+            await asyncio.sleep(ctx.rotation_poll_seconds)
+
 async def stale_runs_watchdog_loop(ctx: WorkerContext) -> None:
     """Watchdog для зависших запусков.
 
@@ -475,10 +599,10 @@ async def _execute_run(
     if facts_run and len(hosts) == 1:
         facts_host_id = hosts[0].get("id")
 
-    used_runner = False
+    used_runner_status: str | None = None
     try:
         if ctx.use_ansible_runner:
-            used_runner = await _run_with_ansible_runner(
+            used_runner_status = await _run_with_ansible_runner(
                 ctx,
                 client,
                 token,
@@ -497,10 +621,19 @@ async def _execute_run(
             )
     except Exception as exc:  # noqa: BLE001
         logger.exception("ansible-runner failed, fallback to ansible-playbook run_id=%s: %s", run_id, exc)
-        used_runner = False
+        used_runner_status = None
 
-    if used_runner:
+    if used_runner_status:
         # статус и логи выставлены внутри runner.
+        await _finalize_rotation(
+            client,
+            token,
+            run_id=run_id,
+            project_id=project_id,
+            status_value=used_runner_status,
+            targets=targets,
+            request_id=rid,
+        )
         return True
 
     if facts_run:
@@ -596,14 +729,26 @@ async def _execute_run(
             _append_file(run_log_path, f"==> timeout: превышен лимит {ctx.run_timeout_seconds}s, останавливаем процесс\n")
             proc.kill()
             await proc.wait()
-            await _set_status(client, token, run_id, "failed", request_id=rid, project_id=project_id)
+            status_value = "failed"
+            await _set_status(client, token, run_id, status_value, request_id=rid, project_id=project_id)
+            await _finalize_rotation(
+                client,
+                token,
+                run_id=run_id,
+                project_id=project_id,
+                status_value=status_value,
+                targets=targets,
+                request_id=rid,
+            )
         else:
             code = await proc.wait()
             if code == 0:
+                status_value = "success"
                 await _append_log(client, token, run_id, "==> done: success\n", request_id=rid, project_id=project_id)
                 _append_file(run_log_path, "==> done: success\n")
-                await _set_status(client, token, run_id, "success", request_id=rid, project_id=project_id)
+                await _set_status(client, token, run_id, status_value, request_id=rid, project_id=project_id)
             else:
+                status_value = "failed"
                 await _append_log(
                     client,
                     token,
@@ -613,7 +758,16 @@ async def _execute_run(
                     project_id=project_id,
                 )
                 _append_file(run_log_path, f"==> done: failed (exit={code})\n")
-                await _set_status(client, token, run_id, "failed", request_id=rid, project_id=project_id)
+                await _set_status(client, token, run_id, status_value, request_id=rid, project_id=project_id)
+            await _finalize_rotation(
+                client,
+                token,
+                run_id=run_id,
+                project_id=project_id,
+                status_value=status_value,
+                targets=targets,
+                request_id=rid,
+            )
     finally:
         if proc.returncode is None:
             proc.kill()
@@ -642,16 +796,16 @@ async def _run_with_ansible_runner(
     project_id: int,
     facts_run: bool,
     facts_host_id: int | None,
-) -> bool:
+) -> str | None:
     """Запуск плейбука через ansible-runner (с event stream).
 
-    Возвращает True, если удалось выполнить запуск через runner (даже если он завершился failed),
-    и False — если runner недоступен/не должен использоваться.
+    Возвращает итоговый статус (success/failed) если runner отработал,
+    или None — если runner недоступен/не должен использоваться.
     """
     try:
         import ansible_runner  # type: ignore
     except Exception:
-        return False
+        return None
 
     private_dir = run_dir / "runner"
     (private_dir / "project").mkdir(parents=True, exist_ok=True)
@@ -790,7 +944,7 @@ async def _run_with_ansible_runner(
             shutil.rmtree(private_dir, ignore_errors=True)
         except Exception:
             pass
-    return True
+    return status_value
 
 
 async def _bump_attempt(r: "redis.Redis", run_id: int) -> int:
@@ -844,6 +998,77 @@ async def _set_status(
         request_id=request_id or _make_request_id(f"worker-run-{run_id}"),
         project_id=project_id,
     )
+
+
+async def _finalize_rotation(
+    client: httpx.AsyncClient,
+    token: str,
+    *,
+    run_id: int,
+    project_id: int,
+    status_value: str,
+    targets: dict[str, Any],
+    request_id: str,
+) -> None:
+    rotation = targets.get("rotation") or {}
+    target_secret_id = rotation.get("target_secret_id")
+    temp_secret_id = rotation.get("temp_secret_id")
+    if not target_secret_id or not temp_secret_id:
+        return
+
+    if status_value == "success":
+        reveal = await _backend_post(
+            client,
+            token,
+            f"/api/v1/secrets/{int(temp_secret_id)}/reveal-internal",
+            request_id=f"{request_id}-rotation-reveal",
+            project_id=project_id,
+        )
+        if reveal.status_code == 200:
+            payload = reveal.json()
+            rotate_payload: dict[str, Any] = {"value": payload.get("value", "")}
+            if payload.get("passphrase"):
+                rotate_payload["passphrase"] = payload.get("passphrase")
+            rotate = await _backend_post(
+                client,
+                token,
+                f"/api/v1/secrets/{int(target_secret_id)}/rotate",
+                json_body=rotate_payload,
+                request_id=f"{request_id}-rotation-apply",
+                project_id=project_id,
+            )
+            if rotate.status_code not in {200, 201}:
+                logger.warning(
+                    "Rotation apply failed run_id=%s secret_id=%s status=%s body=%s",
+                    run_id,
+                    target_secret_id,
+                    rotate.status_code,
+                    rotate.text[:200],
+                )
+        else:
+            logger.warning(
+                "Rotation reveal failed run_id=%s temp_secret_id=%s status=%s body=%s",
+                run_id,
+                temp_secret_id,
+                reveal.status_code,
+                reveal.text[:200],
+            )
+
+    delete_resp = await _backend_delete(
+        client,
+        token,
+        f"/api/v1/secrets/{int(temp_secret_id)}",
+        request_id=f"{request_id}-rotation-clean",
+        project_id=project_id,
+    )
+    if delete_resp.status_code not in {200, 204}:
+        logger.warning(
+            "Rotation cleanup failed run_id=%s temp_secret_id=%s status=%s body=%s",
+            run_id,
+            temp_secret_id,
+            delete_resp.status_code,
+            delete_resp.text[:200],
+        )
 
 
 async def _reveal_secret(
@@ -1037,6 +1262,7 @@ async def main() -> None:
         consume_runs_loop(ctx),
         schedule_runs_loop(ctx),
         stale_runs_watchdog_loop(ctx),
+        secret_rotation_loop(ctx),
     )
 
 

@@ -550,6 +550,14 @@ body {
   flex-wrap: wrap;
 }
 
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 0.5rem 0 0.75rem;
+  font-size: 0.95rem;
+}
+
 .multi-select {
   min-height: 220px;
   max-height: 320px;

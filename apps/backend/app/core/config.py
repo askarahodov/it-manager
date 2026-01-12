@@ -18,6 +18,12 @@ class Settings(BaseSettings):
     bootstrap_admin_email: str = "admin@it.local"
     bootstrap_admin_password: str = "admin123"
     json_logs: bool = False
+    smtp_host: str | None = None
+    smtp_port: int = 587
+    smtp_user: str | None = None
+    smtp_password: str | None = None
+    smtp_from: str | None = None
+    smtp_tls: bool = True
 
     @property
     def frontend_cors_origins_list(self) -> List[str]:

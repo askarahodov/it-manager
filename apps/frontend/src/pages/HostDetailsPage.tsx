@@ -22,6 +22,9 @@ type Host = {
   description?: string | null;
   credential_id?: number | null;
   last_checked_at?: string | null;
+  last_run_id?: number | null;
+  last_run_status?: string | null;
+  last_run_at?: string | null;
 };
 
 type HostFormState = {
@@ -367,6 +370,11 @@ function HostDetailsPage({ hostId }: { hostId: number }) {
                 <div><strong>ID:</strong> {host.id}</div>
                 <div><strong>Статус:</strong> {host.status}</div>
                 <div><strong>Последняя проверка:</strong> {host.last_checked_at ? new Date(host.last_checked_at).toLocaleString() : "—"}</div>
+                <div>
+                  <strong>Последний Ansible-run:</strong>{" "}
+                  {host.last_run_status ? `${host.last_run_status}${host.last_run_id ? ` (#${host.last_run_id})` : ""}` : "—"}
+                </div>
+                <div><strong>Время последнего run:</strong> {host.last_run_at ? new Date(host.last_run_at).toLocaleString() : "—"}</div>
                 <div><strong>Метод проверки:</strong> {(host as any).check_method ?? "tcp"}</div>
                 <div><strong>Credential ID:</strong> {host.credential_id ?? "—"}</div>
               </div>

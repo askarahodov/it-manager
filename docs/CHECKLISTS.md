@@ -57,7 +57,7 @@
 - [x] Project entity + изоляция hosts/groups/secrets/playbooks/runs
 - [x] ограничения доступа пользователей по проектам (allowed_project_ids) + enforcement в API/WS
 - [x] единый выбор текущего проекта (fallback default/allowlist) для HTTP + WS terminal
-- [ ] глобальные shared сущности (секреты/шаблоны) + политики доступа
+- [x] глобальные shared сущности (секреты) + политики доступа
 - [x] UI: переключатель проекта в topbar
 - [x] миграция текущих данных в default project
 - [x] unit/integration тесты на project scoping и project fallback
@@ -65,11 +65,11 @@
 ### Advanced Host Health
 - [ ] сбор метрик (uptime/load/disk/memory) + сохранение последнего статуса
 - [ ] упрощённая история (time-series) для health checks
-- [ ] last ansible run status на Host details
+- [x] last ansible run status на Host details
 - [ ] custom checks через ansible facts (MVP)
 
 ### Automation 2.0
-- [ ] playbook templates (vars schema + defaults)
+- [x] playbook templates (vars schema + defaults)
 - [ ] instances (values + binding)
 - [ ] auto-generated форма + валидация типов (string/enum/secret/use-only)
 - [ ] approval flow для prod (requester/approver + diff)

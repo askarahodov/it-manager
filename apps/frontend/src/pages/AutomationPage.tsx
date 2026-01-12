@@ -54,6 +54,15 @@ type Group = {
   type: "static" | "dynamic";
 };
 
+type PlaybookTemplate = {
+  id: number;
+  name: string;
+  description?: string | null;
+  vars_schema: Record<string, unknown>;
+  vars_defaults: Record<string, unknown>;
+  created_at: string;
+};
+
 const defaultPlaybookYaml = `---
 - name: demo
   hosts: all
@@ -74,6 +83,7 @@ function AutomationPage() {
   const [runs, setRuns] = useState<Run[]>([]);
   const [hosts, setHosts] = useState<Host[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
+  const [templates, setTemplates] = useState<PlaybookTemplate[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -88,6 +98,12 @@ function AutomationPage() {
   const [pbScheduleGroupIds, setPbScheduleGroupIds] = useState<number[]>([]);
   const [pbScheduleExtraVars, setPbScheduleExtraVars] = useState<string>("{}");
   const [pbScheduleDry, setPbScheduleDry] = useState(false);
+
+  const [editTemplateId, setEditTemplateId] = useState<number | null>(null);
+  const [tplName, setTplName] = useState("");
+  const [tplDescription, setTplDescription] = useState("");
+  const [tplSchema, setTplSchema] = useState<string>("{}");
+  const [tplDefaults, setTplDefaults] = useState<string>("{}");
 
   const [runModal, setRunModal] = useState<{ open: boolean; playbook: Playbook | null }>({
     open: false,
@@ -140,21 +156,43 @@ function AutomationPage() {
     }
   }, [runExtraVars]);
 
+  const templateSchemaError = useMemo(() => {
+    try {
+      JSON.parse(tplSchema || "{}");
+      return null;
+    } catch {
+      return "Некорректный JSON в vars schema.";
+    }
+  }, [tplSchema]);
+
+  const templateDefaultsError = useMemo(() => {
+    try {
+      JSON.parse(tplDefaults || "{}");
+      return null;
+    } catch {
+      return "Некорректный JSON в vars defaults.";
+    }
+  }, [tplDefaults]);
+
+  const templateJsonError = templateSchemaError || templateDefaultsError;
+
   const refreshAll = async () => {
     if (!token) return;
     setLoading(true);
     setError(null);
     try {
-      const [pb, rr, hh, gg] = await Promise.all([
+      const [pb, rr, hh, gg, tt] = await Promise.all([
         apiFetch<Playbook[]>("/api/v1/playbooks/", { token }),
         apiFetch<Run[]>("/api/v1/runs/", { token }),
         apiFetch<Host[]>("/api/v1/hosts/", { token }),
         apiFetch<Group[]>("/api/v1/groups/", { token }),
+        apiFetch<PlaybookTemplate[]>("/api/v1/playbook-templates/", { token }),
       ]);
       setPlaybooks(pb);
       setRuns(rr);
       setHosts(hh);
       setGroups(gg);
+      setTemplates(tt);
     } catch (err) {
       const msg = formatError(err);
       setError(msg);
@@ -182,6 +220,22 @@ function AutomationPage() {
     setPbScheduleGroupIds([]);
     setPbScheduleExtraVars("{}");
     setPbScheduleDry(false);
+  };
+
+  const resetTemplateForm = () => {
+    setEditTemplateId(null);
+    setTplName("");
+    setTplDescription("");
+    setTplSchema("{}");
+    setTplDefaults("{}");
+  };
+
+  const startEditTemplate = (tpl: PlaybookTemplate) => {
+    setEditTemplateId(tpl.id);
+    setTplName(tpl.name);
+    setTplDescription(tpl.description ?? "");
+    setTplSchema(JSON.stringify(tpl.vars_schema ?? {}, null, 2));
+    setTplDefaults(JSON.stringify(tpl.vars_defaults ?? {}, null, 2));
   };
 
   const startEditPlaybook = (pb: Playbook) => {
@@ -257,6 +311,70 @@ function AutomationPage() {
       const msg = formatError(err);
       setError(msg);
       pushToast({ title: "Ошибка сохранения плейбука", description: msg, variant: "error" });
+    }
+  };
+
+  const submitTemplate = async (e: FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    if (!token) return;
+    if (!isAdmin) {
+      setError("Требуются права admin.");
+      return;
+    }
+    if (templateJsonError) {
+      setError(templateJsonError);
+      pushToast({ title: "Ошибка валидации", description: templateJsonError, variant: "error" });
+      return;
+    }
+    try {
+      const payload = {
+        name: tplName,
+        description: tplDescription || null,
+        vars_schema: JSON.parse(tplSchema || "{}"),
+        vars_defaults: JSON.parse(tplDefaults || "{}"),
+      };
+      const url = editTemplateId ? `/api/v1/playbook-templates/${editTemplateId}` : "/api/v1/playbook-templates/";
+      const method = editTemplateId ? "PUT" : "POST";
+      const saved = await apiFetch<PlaybookTemplate>(url, {
+        method,
+        token,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      setTemplates((prev) => {
+        if (editTemplateId) {
+          return prev.map((t) => (t.id === saved.id ? saved : t));
+        }
+        return [...prev, saved].sort((a, b) => a.name.localeCompare(b.name));
+      });
+      resetTemplateForm();
+      pushToast({ title: editTemplateId ? "Шаблон обновлён" : "Шаблон создан", description: saved.name, variant: "success" });
+    } catch (err) {
+      const msg = formatError(err);
+      setError(msg);
+      pushToast({ title: "Ошибка сохранения шаблона", description: msg, variant: "error" });
+    }
+  };
+
+  const deleteTemplate = async (tpl: PlaybookTemplate) => {
+    if (!token) return;
+    if (!isAdmin) return;
+    const ok = await confirm({
+      title: "Удалить шаблон?",
+      description: `Будет удалён шаблон "${tpl.name}".`,
+      confirmText: "Удалить",
+      cancelText: "Отмена",
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      await apiFetch<void>(`/api/v1/playbook-templates/${tpl.id}`, { method: "DELETE", token });
+      setTemplates((prev) => prev.filter((t) => t.id !== tpl.id));
+      pushToast({ title: "Шаблон удалён", description: tpl.name, variant: "success" });
+    } catch (err) {
+      const msg = formatError(err);
+      pushToast({ title: "Ошибка удаления шаблона", description: msg, variant: "error" });
     }
   };
 
@@ -410,6 +528,80 @@ function AutomationPage() {
 
       {error && <p className="text-error">{error}</p>}
       {loading && <p>Загружаем...</p>}
+
+      <div className="grid">
+        <div className="panel">
+          <div className="panel-title">
+            <h2>Шаблоны плейбуков</h2>
+            <p className="form-helper">Vars schema и defaults для будущих инстансов.</p>
+          </div>
+          {templates.length === 0 && <p>Шаблонов пока нет</p>}
+          {templates.length > 0 && (
+            <table className="hosts-table">
+              <thead>
+                <tr>
+                  <th>Название</th>
+                  <th>Описание</th>
+                  <th>Действия</th>
+                </tr>
+              </thead>
+              <tbody>
+                {templates.map((tpl) => (
+                  <tr key={tpl.id}>
+                    <td>{tpl.name}</td>
+                    <td>{tpl.description ?? ""}</td>
+                    <td>
+                      <div className="row-actions">
+                        <button type="button" className="ghost-button" onClick={() => startEditTemplate(tpl)} disabled={!isAdmin}>
+                          Редактировать
+                        </button>
+                        <button type="button" className="ghost-button" onClick={() => deleteTemplate(tpl)} disabled={!isAdmin}>
+                          Удалить
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+
+        <div className="panel">
+          <div className="panel-title">
+            <h2>{editTemplateId ? "Редактировать шаблон" : "Создать шаблон"}</h2>
+            {!isAdmin && <p className="form-helper">Создание/редактирование доступно только admin.</p>}
+          </div>
+          <form className="form-stack" onSubmit={submitTemplate}>
+            <label>
+              Название
+              <input value={tplName} onChange={(e) => setTplName(e.target.value)} required minLength={3} disabled={!isAdmin} />
+            </label>
+            <label>
+              Описание
+              <input value={tplDescription} onChange={(e) => setTplDescription(e.target.value)} placeholder="Опционально" disabled={!isAdmin} />
+            </label>
+            <label>
+              Vars schema (JSON)
+              <textarea value={tplSchema} onChange={(e) => setTplSchema(e.target.value)} rows={6} style={{ resize: "vertical" }} disabled={!isAdmin} />
+              {templateSchemaError && <span className="text-error">{templateSchemaError}</span>}
+            </label>
+            <label>
+              Vars defaults (JSON)
+              <textarea value={tplDefaults} onChange={(e) => setTplDefaults(e.target.value)} rows={6} style={{ resize: "vertical" }} disabled={!isAdmin} />
+              {templateDefaultsError && <span className="text-error">{templateDefaultsError}</span>}
+            </label>
+            <div className="form-actions">
+              <button type="submit" className="primary-button" disabled={!isAdmin || Boolean(templateJsonError)}>
+                Сохранить
+              </button>
+              <button type="button" className="ghost-button" onClick={resetTemplateForm}>
+                Сброс
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
 
       <div className="grid">
         <div className="panel">

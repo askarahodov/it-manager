@@ -57,7 +57,7 @@
 - [x] сущность Project (tenant) + привязка hosts/groups/secrets/playbooks/runs
 - [x] ограничения доступа пользователей по проектам (allowed_project_ids)
 - [x] единый fallback выбора проекта (default/allowlist) для HTTP и WS terminal
-- [ ] глобальные сущности (shared secrets/templates) и политика доступа
+- [x] глобальные сущности (shared secrets) и политика доступа
 - [x] UI: Project switcher в topbar (как GitLab) + изоляция данных
 - [x] миграция существующих данных в default project
 
@@ -68,7 +68,7 @@
 - [ ] custom checks через ansible facts/модули (MVP)
 
 ## Фаза 11: Automation 2.0
-- [ ] playbook templates (vars schema + defaults)
+- [x] playbook templates (vars schema + defaults)
 - [ ] instances (values + binding hosts/groups)
 - [ ] auto-generated форма с валидацией типов (string/enum/secret/use-only)
 - [ ] approval flow для prod (requester/approver + история + diff параметров)

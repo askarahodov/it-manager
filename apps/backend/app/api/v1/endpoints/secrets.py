@@ -1,12 +1,12 @@
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.deps import get_current_project_id, get_db, require_permission
-from app.api.v1.schemas.secrets import SecretCreate, SecretRead, SecretReveal, SecretRevealInternal, SecretUpdate
+from app.api.v1.schemas.secrets import SecretCreate, SecretRead, SecretReveal, SecretRevealInternal, SecretScope, SecretUpdate
 from app.core.rbac import Permission
 from app.db.models import Host, Secret
 from app.services.audit import audit_log
@@ -22,7 +22,11 @@ async def list_secrets(
     principal=Depends(require_permission(Permission.secrets_read_metadata)),
     project_id: int = Depends(get_current_project_id),
 ):
-    query = await db.execute(select(Secret).where(Secret.project_id == project_id).order_by(Secret.name))
+    query = await db.execute(
+        select(Secret)
+        .where(or_(Secret.project_id == project_id, Secret.project_id.is_(None)))
+        .order_by(Secret.name)
+    )
     return query.scalars().all()
 
 
@@ -36,7 +40,7 @@ async def get_secret(
     secret = await db.get(Secret, secret_id)
     if not secret:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Секрет не найден")
-    if secret.project_id != project_id:
+    if secret.project_id is not None and secret.project_id != project_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Секрет не найден")
     return secret
 
@@ -50,9 +54,10 @@ async def create_secret(
 ):
     encrypted = encrypt_value(payload.value)
     encrypted_passphrase = encrypt_value(payload.passphrase) if payload.passphrase else None
+    secret_project_id = None if payload.scope == SecretScope.global_ else project_id
     secret = Secret(
         **payload.model_dump(exclude={"value", "passphrase"}),
-        project_id=project_id,
+        project_id=secret_project_id,
         encrypted_value=encrypted,
         encrypted_passphrase=encrypted_passphrase,
     )
@@ -83,7 +88,7 @@ async def update_secret(
     secret = await db.get(Secret, secret_id)
     if not secret:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Секрет не найден")
-    if secret.project_id != project_id:
+    if secret.project_id is not None and secret.project_id != project_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Секрет не найден")
 
     encrypted = encrypt_value(payload.value) if payload.value else secret.encrypted_value
@@ -92,6 +97,10 @@ async def update_secret(
     )
     for field, value in payload.model_dump(exclude={"value", "passphrase"}, exclude_none=True).items():
         setattr(secret, field, value)
+    if payload.scope == SecretScope.global_:
+        secret.project_id = None
+    else:
+        secret.project_id = project_id
     secret.encrypted_value = encrypted
     secret.encrypted_passphrase = encrypted_passphrase
     await db.commit()
@@ -119,7 +128,7 @@ async def reveal_secret(
     secret = await db.get(Secret, secret_id)
     if not secret:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Секрет не найден")
-    if secret.project_id != project_id:
+    if secret.project_id is not None and secret.project_id != project_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Секрет не найден")
 
     value = decrypt_value(secret.encrypted_value)
@@ -150,7 +159,7 @@ async def reveal_secret_internal(
     secret = await db.get(Secret, secret_id)
     if not secret:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Секрет не найден")
-    if secret.project_id != project_id:
+    if secret.project_id is not None and secret.project_id != project_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Секрет не найден")
 
     value = decrypt_value(secret.encrypted_value)
@@ -178,11 +187,14 @@ async def delete_secret(
     secret = await db.get(Secret, secret_id)
     if not secret:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Секрет не найден")
-    if secret.project_id != project_id:
+    if secret.project_id is not None and secret.project_id != project_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Секрет не найден")
 
+    host_query = select(Host).where(Host.credential_id == secret_id)
+    if secret.project_id is not None:
+        host_query = host_query.where(Host.project_id == project_id)
     used_by = await db.execute(
-        select(Host).where(Host.project_id == project_id).where(Host.credential_id == secret_id)
+        host_query
     )
     if used_by.scalar():
         raise HTTPException(

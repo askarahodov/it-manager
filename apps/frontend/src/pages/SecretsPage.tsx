@@ -7,12 +7,14 @@ import { useToast } from "../components/ui/ToastProvider";
 import { formatError } from "../lib/errors";
 
 type SecretType = "text" | "password" | "token" | "private_key";
+type SecretScope = "project" | "global";
 
 type Secret = {
   id: number;
+  project_id: number | null;
   name: string;
   type: SecretType;
-  scope: string;
+  scope: SecretScope;
   description?: string | null;
   tags: Record<string, string>;
   created_at: string;
@@ -21,7 +23,7 @@ type Secret = {
 type SecretFormState = {
   name: string;
   type: SecretType;
-  scope: string;
+  scope: SecretScope;
   description: string;
   tags: string;
   value: string;
@@ -31,7 +33,7 @@ type SecretFormState = {
 const defaultForm: SecretFormState = {
   name: "",
   type: "password",
-  scope: "global",
+  scope: "project",
   description: "",
   tags: "",
   value: "",
@@ -64,6 +66,7 @@ function SecretsPage() {
 
   const isAdmin = user?.role === "admin";
   const canReveal = isAdmin;
+  const scopeLabel = (secret: Secret) => (secret.project_id == null ? "global" : "project");
 
   const stats = useMemo(() => {
     const summary: Record<SecretType, number> = { text: 0, password: 0, token: 0, private_key: 0 };
@@ -188,7 +191,7 @@ function SecretsPage() {
     setForm({
       name: secret.name,
       type: secret.type,
-      scope: secret.scope,
+      scope: scopeLabel(secret),
       description: secret.description ?? "",
       tags: Object.entries(secret.tags)
         .map(([k, v]) => `${k}=${v}`)
@@ -263,7 +266,7 @@ function SecretsPage() {
                     <tr key={secret.id}>
                       <td>{secret.name}</td>
                       <td>{secret.type}</td>
-                      <td>{secret.scope}</td>
+                      <td>{scopeLabel(secret)}</td>
                       <td>
                         <div className="row-actions">
                           <button
@@ -332,9 +335,15 @@ function SecretsPage() {
             </label>
             <label>
               Scope
-              <select value={form.scope} onChange={(e) => setForm((prev) => ({ ...prev, scope: e.target.value }))} disabled={!isAdmin}>
+              <select
+                value={form.scope}
+                onChange={(e) => setForm((prev) => ({ ...prev, scope: e.target.value as SecretScope }))}
+                disabled={!isAdmin}
+              >
+                <option value="project">project</option>
                 <option value="global">global</option>
               </select>
+              <span className="form-helper">project — секрет виден только в текущем проекте; global — виден во всех проектах.</span>
             </label>
             <label>
               Описание

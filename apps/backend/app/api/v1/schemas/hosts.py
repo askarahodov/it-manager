@@ -81,5 +81,8 @@ class HostRead(HostBase):
     project_id: int
     status: HostStatusEnum = HostStatusEnum.unknown
     last_checked_at: Optional[datetime]
+    last_run_id: Optional[int] = None
+    last_run_status: Optional[str] = None
+    last_run_at: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)

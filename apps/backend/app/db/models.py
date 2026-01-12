@@ -75,12 +75,12 @@ class Secret(Base):
     __tablename__ = "secrets"
 
     id = Column(Integer, primary_key=True, index=True)
-    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False, default=1, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=True, default=1, index=True)
     name = Column(String, nullable=False)
     type = Column(Enum(SecretType), nullable=False)
     encrypted_value = Column(Text, nullable=False)
     encrypted_passphrase = Column(Text, nullable=True)
-    scope = Column(String, default="global")
+    scope = Column(String, default="project")
     description = Column(Text, nullable=True)
     tags = Column(JSONB, default=dict)
     created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
@@ -104,6 +104,9 @@ class Host(Base):
     status = Column(Enum(HostStatus), default=HostStatus.unknown)
     check_method = Column(Enum(HostCheckMethod), default=HostCheckMethod.tcp, nullable=False)
     last_checked_at = Column(DateTime, nullable=True)
+    last_run_id = Column(Integer, nullable=True)
+    last_run_status = Column(String, nullable=True)
+    last_run_at = Column(DateTime, nullable=True)
     credential_id = Column(Integer, ForeignKey("secrets.id"), nullable=True)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, onupdate=datetime.utcnow())
@@ -176,6 +179,36 @@ class Playbook(Base):
     stored_content = Column(Text, nullable=True)
     inventory_scope = Column(JSONB, default=list)
     variables = Column(JSONB, default=dict)
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, onupdate=datetime.utcnow())
+
+
+class PlaybookTemplate(Base):
+    __tablename__ = "playbook_templates"
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False, default=1, index=True)
+    name = Column(String, nullable=False)
+    description = Column(Text, nullable=True)
+    vars_schema = Column(JSONB, default=dict)
+    vars_defaults = Column(JSONB, default=dict)
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, onupdate=datetime.utcnow())
+
+
+class PlaybookInstance(Base):
+    __tablename__ = "playbook_instances"
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False, default=1, index=True)
+    template_id = Column(Integer, ForeignKey("playbook_templates.id"), nullable=False)
+    name = Column(String, nullable=False)
+    description = Column(Text, nullable=True)
+    values = Column(JSONB, default=dict)
+    host_ids = Column(JSONB, default=list)
+    group_ids = Column(JSONB, default=list)
     created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, onupdate=datetime.utcnow())

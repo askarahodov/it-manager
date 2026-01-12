@@ -151,8 +151,8 @@ async def create_host(
 ):
     if payload.credential_id:
         secret = await db.get(Secret, int(payload.credential_id))
-        if not secret or secret.project_id != project_id:
-            raise HTTPException(status_code=400, detail="Credential должен быть из текущего проекта")
+        if not secret or (secret.project_id is not None and secret.project_id != project_id):
+            raise HTTPException(status_code=400, detail="Credential должен быть из текущего проекта или global")
 
     new_host = Host(**payload.model_dump(), project_id=project_id)
     db.add(new_host)
@@ -205,8 +205,8 @@ async def update_host(
     updates = payload.model_dump(exclude_unset=True)
     if "credential_id" in updates and updates["credential_id"]:
         secret = await db.get(Secret, int(updates["credential_id"]))
-        if not secret or secret.project_id != project_id:
-            raise HTTPException(status_code=400, detail="Credential должен быть из текущего проекта")
+        if not secret or (secret.project_id is not None and secret.project_id != project_id):
+            raise HTTPException(status_code=400, detail="Credential должен быть из текущего проекта или global")
 
     for field, value in updates.items():
         setattr(existing, field, value)

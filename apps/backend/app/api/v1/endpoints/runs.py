@@ -21,6 +21,7 @@ from app.core.rbac import Permission, has_permission
 from app.core.security import verify_token
 from app.core.config import settings
 from app.db.models import JobRun, JobStatus, Playbook, User
+from app.db.models import Host
 from app.services.audit import audit_log
 from app.services.projects import ProjectAccessDenied, ProjectNotFound, resolve_current_project_id
 
@@ -145,6 +146,22 @@ async def set_status(
     run.status = payload.status
     if payload.finished_at:
         run.finished_at = payload.finished_at
+    # Обновляем "последний запуск" на хостах (best-effort).
+    if payload.status in {JobStatus.success, JobStatus.failed}:
+        try:
+            host_ids = [
+                int(h.get("id"))
+                for h in (run.target_snapshot or {}).get("hosts", [])
+                if str(h.get("id", "")).isdigit()
+            ]
+            if host_ids:
+                res = await db.execute(select(Host).where(Host.project_id == project_id).where(Host.id.in_(host_ids)))
+                for host in res.scalars().all():
+                    host.last_run_id = run.id
+                    host.last_run_status = payload.status.value
+                    host.last_run_at = run.finished_at or datetime.utcnow()
+        except Exception:  # noqa: BLE001
+            logger.exception("Failed to update hosts last_run fields for run_id=%s", run_id)
     await db.commit()
     await audit_log(
         db,

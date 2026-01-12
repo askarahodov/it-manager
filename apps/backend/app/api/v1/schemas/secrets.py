@@ -11,11 +11,15 @@ class SecretType(str, Enum):
     token = "token"
     private_key = "private_key"
 
+class SecretScope(str, Enum):
+    project = "project"
+    global_ = "global"
+
 
 class SecretBase(BaseModel):
     name: str = Field(..., min_length=3)
     type: SecretType
-    scope: str = "global"
+    scope: SecretScope = SecretScope.project
     description: Optional[str] = None
     tags: Dict[str, str] = Field(default_factory=dict)
 
@@ -32,7 +36,7 @@ class SecretUpdate(SecretBase):
 
 class SecretRead(SecretBase):
     id: int
-    project_id: int
+    project_id: Optional[int] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
 

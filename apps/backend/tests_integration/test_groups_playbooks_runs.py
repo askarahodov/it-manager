@@ -79,6 +79,12 @@ async def test_groups_and_playbook_run_lifecycle(client: httpx.AsyncClient, admi
     run_get.raise_for_status()
     assert "hello" in run_get.json()["logs"]
 
+    # host should have last run fields updated
+    host_get = await client.get(f"/api/v1/hosts/{host_id}", headers=headers)
+    host_get.raise_for_status()
+    assert host_get.json()["last_run_id"] == run_id
+    assert host_get.json()["last_run_status"] == "success"
+
 
 async def test_runs_stream_implicit_project_selection(client: httpx.AsyncClient, admin_token: str, uniq: str):
     admin_headers = {"Authorization": f"Bearer {admin_token}"}

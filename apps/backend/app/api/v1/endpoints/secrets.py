@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import or_, select
@@ -6,7 +7,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.deps import get_current_project_id, get_db, require_permission
-from app.api.v1.schemas.secrets import SecretCreate, SecretRead, SecretReveal, SecretRevealInternal, SecretScope, SecretUpdate
+from app.api.v1.schemas.secrets import SecretCreate, SecretRead, SecretReveal, SecretRevealInternal, SecretRotateRequest, SecretScope, SecretUpdate
 from app.core.rbac import Permission
 from app.db.models import Host, Secret
 from app.services.audit import audit_log
@@ -15,6 +16,13 @@ from app.services.triggers import dispatch_secret_triggers
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+def _compute_next_rotation(last_rotated_at: datetime | None, interval_days: int | None) -> datetime | None:
+    if not interval_days or interval_days <= 0:
+        return None
+    base = last_rotated_at or datetime.utcnow()
+    return base + timedelta(days=interval_days)
 
 
 @router.get("/", response_model=list[SecretRead])
@@ -56,11 +64,16 @@ async def create_secret(
     encrypted = encrypt_value(payload.value)
     encrypted_passphrase = encrypt_value(payload.passphrase) if payload.passphrase else None
     secret_project_id = None if payload.scope == SecretScope.global_ else project_id
+    created_at = datetime.utcnow()
+    last_rotated_at = created_at if payload.value else None
+    next_rotated_at = _compute_next_rotation(last_rotated_at, payload.rotation_interval_days)
     secret = Secret(
         **payload.model_dump(exclude={"value", "passphrase"}),
         project_id=secret_project_id,
         encrypted_value=encrypted,
         encrypted_passphrase=encrypted_passphrase,
+        last_rotated_at=last_rotated_at,
+        next_rotated_at=next_rotated_at,
     )
     db.add(secret)
     await db.commit()
@@ -100,6 +113,9 @@ async def update_secret(
         "description": secret.description,
         "tags": secret.tags,
         "expires_at": secret.expires_at.isoformat() if secret.expires_at else None,
+        "rotation_interval_days": secret.rotation_interval_days,
+        "last_rotated_at": secret.last_rotated_at.isoformat() if secret.last_rotated_at else None,
+        "next_rotated_at": secret.next_rotated_at.isoformat() if secret.next_rotated_at else None,
     }
     encrypted = encrypt_value(payload.value) if payload.value else secret.encrypted_value
     encrypted_passphrase = (
@@ -113,6 +129,9 @@ async def update_secret(
         secret.project_id = project_id
     secret.encrypted_value = encrypted
     secret.encrypted_passphrase = encrypted_passphrase
+    if should_trigger_rotation:
+        secret.last_rotated_at = datetime.utcnow()
+    secret.next_rotated_at = _compute_next_rotation(secret.last_rotated_at, secret.rotation_interval_days)
     await db.commit()
     await db.refresh(secret)
     after = {
@@ -122,6 +141,9 @@ async def update_secret(
         "description": secret.description,
         "tags": secret.tags,
         "expires_at": secret.expires_at.isoformat() if secret.expires_at else None,
+        "rotation_interval_days": secret.rotation_interval_days,
+        "last_rotated_at": secret.last_rotated_at.isoformat() if secret.last_rotated_at else None,
+        "next_rotated_at": secret.next_rotated_at.isoformat() if secret.next_rotated_at else None,
     }
     await audit_log(
         db,
@@ -135,6 +157,46 @@ async def update_secret(
     )
     if should_trigger_rotation:
         await dispatch_secret_triggers(db, secret, project_id)
+    return secret
+
+
+@router.post("/{secret_id}/rotate", response_model=SecretRead)
+async def rotate_secret(
+    secret_id: int,
+    payload: SecretRotateRequest,
+    db: AsyncSession = Depends(get_db),
+    principal=Depends(require_permission(Permission.secrets_write)),
+    project_id: int = Depends(get_current_project_id),
+):
+    secret = await db.get(Secret, secret_id)
+    if not secret:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Секрет не найден")
+    if secret.project_id is not None and secret.project_id != project_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Секрет не найден")
+
+    secret.encrypted_value = encrypt_value(payload.value)
+    secret.encrypted_passphrase = encrypt_value(payload.passphrase) if payload.passphrase else None
+    secret.last_rotated_at = datetime.utcnow()
+    secret.next_rotated_at = _compute_next_rotation(secret.last_rotated_at, secret.rotation_interval_days)
+    await db.commit()
+    await db.refresh(secret)
+    await audit_log(
+        db,
+        project_id=project_id,
+        actor=principal.email,
+        actor_role=str(principal.role.value),
+        action="secret.rotate",
+        entity_type="secret",
+        entity_id=secret.id,
+        meta={"name": secret.name, "type": secret.type, "scope": secret.scope},
+    )
+    await notify_event(
+        db,
+        project_id=project_id,
+        event="secret.rotated",
+        payload={"secret_id": secret.id, "name": secret.name},
+    )
+    await dispatch_secret_triggers(db, secret, project_id)
     return secret
 
 

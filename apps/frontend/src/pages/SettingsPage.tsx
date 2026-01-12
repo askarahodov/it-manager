@@ -44,7 +44,27 @@ type ProjectItem = {
   created_at: string;
 };
 
+type NotificationEndpoint = {
+  id: number;
+  name: string;
+  type: string;
+  url: string;
+  secret?: string | null;
+  events: string[];
+  enabled: boolean;
+  created_at: string;
+};
+
 const ENV_OPTIONS = ["prod", "stage", "dev"] as const;
+const NOTIFICATION_EVENTS = [
+  "run.failed",
+  "run.success",
+  "approval.requested",
+  "approval.approved",
+  "approval.rejected",
+  "host.offline",
+  "secret.rotated",
+] as const;
 
 function SettingsPage() {
   const { status, user, token, login, logout, refresh } = useAuth();
@@ -91,6 +111,16 @@ function SettingsPage() {
   const [newAllowedGroupIds, setNewAllowedGroupIds] = useState<number[]>([]);
   const [newProjectsRestricted, setNewProjectsRestricted] = useState(false);
   const [newAllowedProjectIds, setNewAllowedProjectIds] = useState<number[]>([]);
+
+  const [notificationEndpoints, setNotificationEndpoints] = useState<NotificationEndpoint[]>([]);
+  const [notificationError, setNotificationError] = useState<string | null>(null);
+  const [notificationLoading, setNotificationLoading] = useState(false);
+  const [notifEditId, setNotifEditId] = useState<number | null>(null);
+  const [notifName, setNotifName] = useState("");
+  const [notifUrl, setNotifUrl] = useState("");
+  const [notifSecret, setNotifSecret] = useState("");
+  const [notifEnabled, setNotifEnabled] = useState(true);
+  const [notifEvents, setNotifEvents] = useState<string[]>([]);
 
   const selectedAccessUser = useMemo(
     () => (accessUserId ? users.find((u) => u.id === accessUserId) ?? null : null),
@@ -154,6 +184,22 @@ function SettingsPage() {
     }
   };
 
+  const loadNotifications = async () => {
+    if (!token || user?.role !== "admin") return;
+    setNotificationLoading(true);
+    setNotificationError(null);
+    try {
+      const items = await apiFetch<NotificationEndpoint[]>("/api/v1/notifications/", { token });
+      setNotificationEndpoints(items);
+    } catch (err) {
+      const msg = formatError(err);
+      setNotificationError(msg);
+      pushToast({ title: "Не удалось загрузить уведомления", description: msg, variant: "error" });
+    } finally {
+      setNotificationLoading(false);
+    }
+  };
+
   const loadAudit = async () => {
     if (!token || user?.role !== "admin") return;
     setAuditLoading(true);
@@ -181,6 +227,7 @@ function SettingsPage() {
     loadUsers().catch(() => undefined);
     loadGroups().catch(() => undefined);
     loadProjects().catch(() => undefined);
+    loadNotifications().catch(() => undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token, user?.role]);
 
@@ -248,6 +295,80 @@ function SettingsPage() {
       const msg = formatError(err);
       setUsersError(msg);
       pushToast({ title: "Ошибка обновления роли", description: msg, variant: "error" });
+    }
+  };
+
+  const resetNotificationForm = () => {
+    setNotifEditId(null);
+    setNotifName("");
+    setNotifUrl("");
+    setNotifSecret("");
+    setNotifEnabled(true);
+    setNotifEvents([]);
+  };
+
+  const submitNotification = async () => {
+    if (!token || user?.role !== "admin") return;
+    setNotificationError(null);
+    try {
+      const payload = {
+        name: notifName,
+        type: "webhook",
+        url: notifUrl,
+        secret: notifSecret || null,
+        enabled: notifEnabled,
+        events: notifEvents,
+      };
+      const url = notifEditId ? `/api/v1/notifications/${notifEditId}` : "/api/v1/notifications/";
+      const method = notifEditId ? "PUT" : "POST";
+      const saved = await apiFetch<NotificationEndpoint>(url, {
+        method,
+        token,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      setNotificationEndpoints((prev) => {
+        if (notifEditId) {
+          return prev.map((x) => (x.id === saved.id ? saved : x));
+        }
+        return [saved, ...prev];
+      });
+      resetNotificationForm();
+      pushToast({ title: notifEditId ? "Webhook обновлён" : "Webhook создан", description: saved.name, variant: "success" });
+    } catch (err) {
+      const msg = formatError(err);
+      setNotificationError(msg);
+      pushToast({ title: "Ошибка сохранения webhook", description: msg, variant: "error" });
+    }
+  };
+
+  const editNotification = (item: NotificationEndpoint) => {
+    setNotifEditId(item.id);
+    setNotifName(item.name);
+    setNotifUrl(item.url);
+    setNotifSecret(item.secret ?? "");
+    setNotifEnabled(Boolean(item.enabled));
+    setNotifEvents(item.events ?? []);
+  };
+
+  const deleteNotification = async (item: NotificationEndpoint) => {
+    if (!token || user?.role !== "admin") return;
+    const ok = await confirm({
+      title: "Удалить webhook?",
+      description: `Будет удалён webhook "${item.name}".`,
+      confirmText: "Удалить",
+      cancelText: "Отмена",
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      await apiFetch<void>(`/api/v1/notifications/${item.id}`, { method: "DELETE", token });
+      setNotificationEndpoints((prev) => prev.filter((x) => x.id !== item.id));
+      pushToast({ title: "Webhook удалён", description: item.name, variant: "success" });
+    } catch (err) {
+      const msg = formatError(err);
+      setNotificationError(msg);
+      pushToast({ title: "Ошибка удаления webhook", description: msg, variant: "error" });
     }
   };
 
@@ -1032,6 +1153,109 @@ function SettingsPage() {
                 </table>
               </div>
             )}
+          </div>
+        )}
+
+        {status === "authenticated" && user?.role === "admin" && (
+          <div className="panel">
+            <div className="panel-title">
+              <h2>Notifications (webhook)</h2>
+              <p className="form-helper">Отправка событий на внешние сервисы (Slack/Telegram через webhook шлюз).</p>
+            </div>
+            <div className="row-actions">
+              <button type="button" className="ghost-button" onClick={() => loadNotifications()}>
+                Обновить
+              </button>
+            </div>
+            {notificationLoading && <p>Загружаем...</p>}
+            {notificationError && <p className="text-error">{notificationError}</p>}
+            {notificationEndpoints.length === 0 && !notificationLoading && <p>Webhook endpoints пока нет</p>}
+            {notificationEndpoints.length > 0 && (
+              <div className="table-scroll" tabIndex={0} aria-label="Notification endpoints">
+                <table className="hosts-table">
+                  <thead>
+                    <tr>
+                      <th>Название</th>
+                      <th>URL</th>
+                      <th>События</th>
+                      <th>Статус</th>
+                      <th>Действия</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {notificationEndpoints.map((item) => (
+                      <tr key={item.id}>
+                        <td>{item.name}</td>
+                        <td className="truncate">{item.url}</td>
+                        <td>{item.events?.length ? item.events.join(", ") : "all"}</td>
+                        <td>{item.enabled ? "enabled" : "disabled"}</td>
+                        <td>
+                          <div className="row-actions">
+                            <button type="button" className="ghost-button" onClick={() => editNotification(item)}>
+                              Редактировать
+                            </button>
+                            <button type="button" className="ghost-button" onClick={() => deleteNotification(item)}>
+                              Удалить
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            <div className="panel" style={{ marginTop: "1rem" }}>
+              <div className="panel-title">
+                <h2>{notifEditId ? "Редактировать webhook" : "Создать webhook"}</h2>
+              </div>
+              <div className="form-stack">
+                <label>
+                  Название
+                  <input value={notifName} onChange={(e) => setNotifName(e.target.value)} required />
+                </label>
+                <label>
+                  URL
+                  <input value={notifUrl} onChange={(e) => setNotifUrl(e.target.value)} required />
+                </label>
+                <label>
+                  Secret (опционально)
+                  <input value={notifSecret} onChange={(e) => setNotifSecret(e.target.value)} placeholder="X-Webhook-Secret" />
+                </label>
+                <label>
+                  События
+                  <select
+                    multiple
+                    value={notifEvents}
+                    onChange={(e) => setNotifEvents(Array.from(e.target.selectedOptions).map((o) => o.value))}
+                    style={{ minHeight: 140 }}
+                  >
+                    {NOTIFICATION_EVENTS.map((event) => (
+                      <option key={event} value={event}>
+                        {event}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="form-helper">Если ничего не выбрано — будут отправляться все события.</span>
+                </label>
+                <label>
+                  Статус
+                  <select value={notifEnabled ? "enabled" : "disabled"} onChange={(e) => setNotifEnabled(e.target.value === "enabled")}>
+                    <option value="enabled">enabled</option>
+                    <option value="disabled">disabled</option>
+                  </select>
+                </label>
+                <div className="row-actions">
+                  <button type="button" className="primary-button" onClick={submitNotification} disabled={!notifName || !notifUrl}>
+                    Сохранить
+                  </button>
+                  <button type="button" className="ghost-button" onClick={resetNotificationForm}>
+                    Сброс
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
         )}
       </div>

@@ -23,6 +23,7 @@ class SecretBase(BaseModel):
     description: Optional[str] = None
     tags: Dict[str, str] = Field(default_factory=dict)
     expires_at: Optional[datetime] = None
+    rotation_interval_days: Optional[int] = Field(default=None, ge=1)
 
 
 class SecretCreate(SecretBase):
@@ -40,6 +41,8 @@ class SecretRead(SecretBase):
     project_id: Optional[int] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
+    last_rotated_at: Optional[datetime] = None
+    next_rotated_at: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -55,4 +58,9 @@ class SecretRevealInternal(BaseModel):
     """
 
     value: str
+    passphrase: Optional[str] = None
+
+
+class SecretRotateRequest(BaseModel):
+    value: str = Field(..., min_length=1)
     passphrase: Optional[str] = None

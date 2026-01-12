@@ -111,6 +111,17 @@ body {
   font-size: 0.85rem;
 }
 
+.search-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.search-hint {
+  font-size: 0.7rem;
+  opacity: 0.7;
+}
+
 .section-shell {
   background: #0f172a;
   padding: 0;
@@ -148,6 +159,68 @@ body {
   background: rgba(59, 130, 246, 0.15);
   border-color: rgba(59, 130, 246, 0.4);
   color: #60a5fa;
+}
+
+.command-palette {
+  max-width: 720px;
+  width: min(92vw, 720px);
+}
+
+.palette-input {
+  width: 100%;
+  background: #0f172a;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  border-radius: 10px;
+  padding: 0.65rem 0.8rem;
+  color: #e2e8f0;
+}
+
+.palette-list {
+  list-style: none;
+  margin: 0.75rem 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0.5rem;
+  max-height: 360px;
+  overflow: auto;
+}
+
+.palette-item {
+  width: 100%;
+  text-align: left;
+  background: #111827;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 12px;
+  padding: 0.65rem 0.8rem;
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  color: #e2e8f0;
+  cursor: pointer;
+}
+
+.palette-item:hover,
+.palette-item:focus-visible {
+  border-color: rgba(56, 189, 248, 0.6);
+  outline: none;
+}
+
+.palette-title {
+  font-size: 0.95rem;
+}
+
+.palette-description {
+  font-size: 0.8rem;
+  color: #94a3b8;
+  margin-top: 0.15rem;
+}
+
+.palette-tag {
+  align-self: flex-start;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #94a3b8;
 }
 
 .diff-summary {

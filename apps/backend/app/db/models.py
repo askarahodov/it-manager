@@ -84,6 +84,9 @@ class Secret(Base):
     description = Column(Text, nullable=True)
     tags = Column(JSONB, default=dict)
     expires_at = Column(DateTime, nullable=True)
+    rotation_interval_days = Column(Integer, nullable=True)
+    last_rotated_at = Column(DateTime, nullable=True)
+    next_rotated_at = Column(DateTime, nullable=True)
     created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, onupdate=datetime.utcnow())
@@ -128,6 +131,21 @@ class HostHealthCheck(Base):
     status = Column(String, nullable=False)
     snapshot = Column(JSONB, nullable=True)
     checked_at = Column(DateTime, server_default=func.now())
+
+
+class SshSession(Base):
+    __tablename__ = "ssh_sessions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False, default=1, index=True)
+    host_id = Column(Integer, ForeignKey("hosts.id"), nullable=False, index=True)
+    actor = Column(String, nullable=False)
+    source_ip = Column(String, nullable=True)
+    started_at = Column(DateTime, server_default=func.now(), nullable=False)
+    finished_at = Column(DateTime, nullable=True)
+    duration_seconds = Column(Integer, nullable=True)
+    success = Column(Boolean, default=True, nullable=False)
+    error = Column(Text, nullable=True)
 
 
 class GroupType(str, enum.Enum):
@@ -307,3 +325,18 @@ class AuditEvent(Base):
     meta = Column(JSONB, default=dict)  # безопасные метаданные
     source_ip = Column(String, nullable=True)
     created_at = Column(DateTime, server_default=func.now(), index=True)
+
+
+class NotificationEndpoint(Base):
+    __tablename__ = "notification_endpoints"
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False, default=1, index=True)
+    name = Column(String, nullable=False)
+    type = Column(String, nullable=False, default="webhook")
+    url = Column(String, nullable=False)
+    secret = Column(String, nullable=True)
+    events = Column(JSONB, default=list)
+    enabled = Column(Boolean, default=True)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, onupdate=datetime.utcnow())

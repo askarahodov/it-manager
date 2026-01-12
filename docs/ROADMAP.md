@@ -78,25 +78,27 @@
 - [x] event-driven triggers: secret rotated
 
 ## Фаза 12: Secrets Vault — Enterprise
-- [ ] secret rotation (manual/scheduled) + политики
+- [x] secret rotation (manual) + политика интервала
+- [ ] secret rotation (scheduled) + фоновые задачи
 - [ ] уведомления: expiring soon / rotated
 - [ ] интеграция rotation с SSH passwords/API tokens (MVP)
 - [ ] dynamic secrets (опционально): TTL creds + auto revoke
 
 ## Фаза 13: SSH & Remote Operations
-- [ ] SSH session recording (metadata): duration/user/host/success-error
+- [x] SSH session recording (metadata): duration/user/host/success-error
 - [ ] full session recording (опционально): флаг + предупреждение + хранение
-- [ ] remote actions (reboot/restart service/fetch logs/upload file) через ansible ad-hoc
+- [x] remote actions (reboot/restart service/fetch logs/upload file) через ansible ad-hoc
 
 ## Фаза 14: UI/UX как у зрелого продукта
-- [ ] global search + Cmd/Ctrl+K quick actions
+- [x] global search + Cmd/Ctrl+K quick actions
 - [x] dashboard widgets: hosts status/failed runs/upcoming schedules/recent SSH
 - [x] dashboard widgets: expiring secrets
 - [x] audit log UI: фильтры + экспорт + before/after + source/IP
 
 ## Фаза 15: Интеграции и масштабирование
 - [ ] git integration: playbooks из repo + auto-sync + commit hash в run history
+- [x] notifications: outbound webhook (run/approval/host/secret)
 - [ ] notifications: Slack/Telegram/Email (failed run/approval needed/secret expiring/host offline)
-- [ ] webhooks: inbound triggers + outbound notifications
+- [x] webhooks: inbound triggers + outbound notifications
 - [ ] plugin system (inventory/secrets/automation backends)
 - [ ] HA/scale: multiple workers, distributed locks, sharding

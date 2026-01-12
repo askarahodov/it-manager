@@ -15,6 +15,7 @@ from app.core.rbac import Permission
 from app.db.models import GroupType, Host, HostGroup, JobRun, JobStatus, Playbook, PlaybookInstance, PlaybookTemplate
 from app.db.models import ApprovalRequest, ApprovalStatus
 from app.services.audit import audit_log
+from app.services.notifications import notify_event
 from app.services.access import apply_group_scope, apply_host_scope
 
 router = APIRouter()
@@ -278,6 +279,12 @@ async def run_instance(
             entity_type="run",
             entity_id=run.id,
             meta={"instance_id": instance.id, "playbook_id": payload.playbook_id, "targets": len(snapshot_hosts), "approval_id": approval.id},
+        )
+        await notify_event(
+            db,
+            project_id=project_id,
+            event="approval.requested",
+            payload={"approval_id": approval.id, "run_id": run.id, "instance_id": instance.id},
         )
     else:
         await enqueue_run(run.id, project_id=project_id)

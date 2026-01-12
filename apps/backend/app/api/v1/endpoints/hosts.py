@@ -11,16 +11,17 @@ from sqlalchemy import asc, desc, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.deps import get_current_project_id, get_db, require_permission
-from app.api.v1.schemas.hosts import HostCreate, HostFactsUpdate, HostHealthHistoryRead, HostRead, HostStatusCheckResponse, HostUpdate
+from app.api.v1.schemas.hosts import HostActionRequest, HostCreate, HostFactsUpdate, HostHealthHistoryRead, HostRead, HostStatusCheckResponse, HostUpdate, SshSessionRead
 from app.api.v1.schemas.runs import RunRead
 from app.core.rbac import Permission, has_permission
-from app.db.models import Host, HostCheckMethod, HostHealthCheck, HostStatus, JobRun, JobStatus, Playbook, Secret, SecretType, User
+from app.db.models import ApprovalRequest, ApprovalStatus, Host, HostCheckMethod, HostHealthCheck, HostStatus, JobRun, JobStatus, Playbook, Secret, SecretType, SshSession, User
 from app.services.access import apply_host_scope, host_access_clause
 from app.services.audit import audit_log
 from app.services.encryption import decrypt_value
 from app.services.projects import ProjectAccessDenied, ProjectNotFound, resolve_current_project_id
 from app.services.triggers import dispatch_host_triggers
 from app.services.queue import enqueue_run
+from app.services.notifications import notify_event
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -34,6 +35,39 @@ FACTS_PLAYBOOK_CONTENT = """---
     - name: facts collected
       debug:
         msg: "facts ok"
+"""
+
+REMOTE_ACTIONS_PLAYBOOK_NAME = "_remote_actions"
+REMOTE_ACTIONS_PLAYBOOK_CONTENT = """---
+- name: remote actions
+  hosts: all
+  gather_facts: false
+  vars:
+    action_type: "{{ action_type }}"
+  tasks:
+    - name: reboot host
+      reboot:
+        reboot_timeout: 600
+      when: action_type == "reboot"
+    - name: restart service
+      service:
+        name: "{{ service_name }}"
+        state: restarted
+      when: action_type == "restart_service"
+    - name: upload file
+      copy:
+        dest: "{{ file_dest }}"
+        content: "{{ file_content }}"
+        mode: "{{ file_mode | default('0644') }}"
+      when: action_type == "upload_file"
+    - name: fetch logs
+      shell: "tail -n {{ log_lines | default(200) }} {{ log_path }}"
+      register: log_output
+      when: action_type == "fetch_logs"
+    - name: print logs
+      debug:
+        var: log_output.stdout
+      when: action_type == "fetch_logs"
 """
 
 
@@ -390,6 +424,13 @@ async def check_status(
         entity_id=host.id,
         meta={"status": host.status, "method": str(method.value)},
     )
+    if status_result == HostStatus.offline:
+        await notify_event(
+            db,
+            project_id=project_id,
+            event="host.offline",
+            payload={"host_id": host.id, "hostname": host.hostname},
+        )
     return host
 
 
@@ -472,6 +513,134 @@ async def refresh_facts(
     return run
 
 
+@router.post("/{host_id}/actions", response_model=RunRead, status_code=status.HTTP_201_CREATED)
+async def run_remote_action(
+    host_id: int,
+    payload: HostActionRequest,
+    db: AsyncSession = Depends(get_db),
+    principal=Depends(require_permission(Permission.ansible_run)),
+    project_id: int = Depends(get_current_project_id),
+):
+    res = await db.execute(
+        select(Host)
+        .where(Host.id == host_id)
+        .where(Host.project_id == project_id)
+        .where(host_access_clause(principal))
+    )
+    host = res.scalar_one_or_none()
+    if not host:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Хост не найден")
+
+    query = await db.execute(
+        select(Playbook).where(Playbook.project_id == project_id).where(Playbook.name == REMOTE_ACTIONS_PLAYBOOK_NAME)
+    )
+    playbook = query.scalar_one_or_none()
+    if not playbook:
+        playbook = Playbook(
+            project_id=project_id,
+            name=REMOTE_ACTIONS_PLAYBOOK_NAME,
+            description="System playbook: remote actions",
+            stored_content=REMOTE_ACTIONS_PLAYBOOK_CONTENT,
+            variables={},
+            inventory_scope=[],
+            created_by=principal.id,
+        )
+        db.add(playbook)
+        await db.commit()
+        await db.refresh(playbook)
+
+    if payload.action_type == "restart_service" and not payload.service_name:
+        raise HTTPException(status_code=400, detail="service_name обязателен для restart_service")
+    if payload.action_type == "fetch_logs" and not payload.log_path:
+        raise HTTPException(status_code=400, detail="log_path обязателен для fetch_logs")
+    if payload.action_type == "upload_file" and (not payload.file_dest or payload.file_content is None):
+        raise HTTPException(status_code=400, detail="file_dest и file_content обязательны для upload_file")
+
+    extra_vars = {
+        "action_type": payload.action_type,
+        "service_name": payload.service_name,
+        "log_path": payload.log_path,
+        "log_lines": payload.log_lines,
+        "file_dest": payload.file_dest,
+        "file_content": payload.file_content,
+        "file_mode": payload.file_mode,
+    }
+    snapshot_hosts = [
+        {
+            "id": host.id,
+            "name": host.name,
+            "hostname": host.hostname,
+            "port": host.port,
+            "username": host.username,
+            "credential_id": host.credential_id,
+        }
+    ]
+    requires_approval = host.environment == "prod"
+    run = JobRun(
+        project_id=project_id,
+        playbook_id=playbook.id,
+        triggered_by=principal.email or "user",
+        status=JobStatus.pending,
+        target_snapshot={
+            "hosts": snapshot_hosts,
+            "group_ids": [],
+            "host_ids": [host.id],
+            "extra_vars": extra_vars,
+            "dry_run": False,
+            "remote_action": payload.action_type,
+            "params_before": {},
+            "params_after": extra_vars,
+        },
+        logs="",
+    )
+    db.add(run)
+    await db.commit()
+    await db.refresh(run)
+
+    if requires_approval:
+        approval = ApprovalRequest(
+            project_id=project_id,
+            run_id=run.id,
+            requested_by=principal.id,
+            status=ApprovalStatus.pending,
+        )
+        db.add(approval)
+        run.target_snapshot["approval_status"] = "pending"
+        await db.commit()
+        await db.refresh(approval)
+        run.target_snapshot["approval_id"] = approval.id
+        await db.commit()
+        await audit_log(
+            db,
+            project_id=project_id,
+            actor=principal.email,
+            actor_role=str(principal.role.value),
+            action="host.remote_action_requires_approval",
+            entity_type="run",
+            entity_id=run.id,
+            meta={"action": payload.action_type, "host_id": host.id, "approval_id": approval.id},
+        )
+        await notify_event(
+            db,
+            project_id=project_id,
+            event="approval.requested",
+            payload={"approval_id": approval.id, "run_id": run.id, "host_id": host.id},
+        )
+    else:
+        await enqueue_run(run.id, project_id=project_id)
+        await audit_log(
+            db,
+            project_id=project_id,
+            actor=principal.email,
+            actor_role=str(principal.role.value),
+            action="host.remote_action",
+            entity_type="run",
+            entity_id=run.id,
+            meta={"action": payload.action_type, "host_id": host.id},
+        )
+    return run
+
+
 @router.post("/{host_id}/facts", status_code=status.HTTP_204_NO_CONTENT)
 async def update_facts(
     host_id: int,
@@ -528,6 +697,33 @@ async def health_history(
         .where(HostHealthCheck.host_id == host_id)
         .where(HostHealthCheck.project_id == project_id)
         .order_by(HostHealthCheck.checked_at.desc())
+        .limit(limit)
+    )
+    return query.scalars().all()
+
+
+@router.get("/{host_id}/ssh-sessions", response_model=list[SshSessionRead])
+async def list_ssh_sessions(
+    host_id: int,
+    db: AsyncSession = Depends(get_db),
+    principal=Depends(require_permission(Permission.hosts_read)),
+    project_id: int = Depends(get_current_project_id),
+    limit: int = Query(default=20, ge=1, le=200),
+):
+    res = await db.execute(
+        select(Host)
+        .where(Host.id == host_id)
+        .where(Host.project_id == project_id)
+        .where(host_access_clause(principal))
+    )
+    host = res.scalar_one_or_none()
+    if not host:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Хост не найден")
+    query = await db.execute(
+        select(SshSession)
+        .where(SshSession.host_id == host_id)
+        .where(SshSession.project_id == project_id)
+        .order_by(SshSession.started_at.desc())
         .limit(limit)
     )
     return query.scalars().all()
@@ -613,6 +809,17 @@ async def host_terminal(
         entity_id=host_id,
         meta={"hostname": host.hostname, "port": host.port, "username": host.username},
     )
+    session = SshSession(
+        project_id=current_project_id,
+        host_id=host_id,
+        actor=str(payload.get("sub")),
+        source_ip=websocket.client.host if websocket.client else None,
+        started_at=datetime.utcnow(),
+        success=True,
+    )
+    db.add(session)
+    await db.commit()
+    await db.refresh(session)
     password: Optional[str] = None
     private_key: Optional[str] = None
     passphrase: Optional[str] = None
@@ -687,7 +894,10 @@ async def host_terminal(
         except Exception as exc:  # noqa: BLE001
             logger.debug("stdout/stderr stream closed: %s", exc)
 
+    session_error: Optional[str] = None
+
     async def _forward_ws():
+        nonlocal session_error
         try:
             async for message in websocket.iter_text():
                 if message and message[0] == "{":
@@ -712,6 +922,7 @@ async def host_terminal(
             logger.info("WS закрыт клиентом host_id=%s", host_id)
         except Exception as exc:  # noqa: BLE001
             logger.exception("Ошибка чтения WS host_id=%s: %s", host_id, exc)
+            session_error = str(exc)
 
     stdout_task = asyncio.create_task(_forward_stream(process.stdout))
     stderr_task = asyncio.create_task(_forward_stream(process.stderr))
@@ -735,6 +946,12 @@ async def host_terminal(
     except Exception:
         pass
     conn.close()
+    session.finished_at = datetime.utcnow()
+    session.duration_seconds = int((session.finished_at - session.started_at).total_seconds())
+    if session_error:
+        session.success = False
+        session.error = session_error
+    await db.commit()
     await audit_log(
         db,
         project_id=current_project_id,

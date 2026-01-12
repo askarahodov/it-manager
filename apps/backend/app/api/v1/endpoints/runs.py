@@ -23,6 +23,7 @@ from app.core.config import settings
 from app.db.models import JobRun, JobStatus, Playbook, User
 from app.db.models import Host
 from app.services.audit import audit_log
+from app.services.notifications import notify_event
 from app.services.projects import ProjectAccessDenied, ProjectNotFound, resolve_current_project_id
 
 logger = logging.getLogger(__name__)
@@ -172,6 +173,12 @@ async def set_status(
         entity_type="run",
         entity_id=run.id,
         meta={"status": run.status},
+    )
+    await notify_event(
+        db,
+        project_id=project_id,
+        event=f"run.{payload.status.value}",
+        payload={"run_id": run.id, "playbook_id": run.playbook_id, "status": payload.status.value},
     )
     return None
 

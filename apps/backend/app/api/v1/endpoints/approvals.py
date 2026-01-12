@@ -10,6 +10,7 @@ from app.api.v1.schemas.approvals import ApprovalDecisionRequest, ApprovalRead
 from app.core.rbac import Permission
 from app.db.models import ApprovalRequest, ApprovalStatus, JobRun
 from app.services.audit import audit_log
+from app.services.notifications import notify_event
 from app.services.queue import enqueue_run
 
 router = APIRouter()
@@ -73,6 +74,12 @@ async def decide_approval(
             entity_id=approval.id,
             meta={"run_id": run.id},
         )
+        await notify_event(
+            db,
+            project_id=project_id,
+            event="approval.approved",
+            payload={"approval_id": approval.id, "run_id": run.id},
+        )
     else:
         await audit_log(
             db,
@@ -83,6 +90,12 @@ async def decide_approval(
             entity_type="approval",
             entity_id=approval.id,
             meta={"run_id": run.id, "reason": payload.reason},
+        )
+        await notify_event(
+            db,
+            project_id=project_id,
+            event="approval.rejected",
+            payload={"approval_id": approval.id, "run_id": run.id, "reason": payload.reason},
         )
 
     return None

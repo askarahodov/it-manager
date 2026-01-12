@@ -75,18 +75,25 @@ E2E тесты живут в `apps/frontend/tests-e2e` и поднимают в�
 - Projects/Tenants: изоляция доменных сущностей по проекту (`project_id`) + UI переключатель проекта.
 - CRUD хостов + статус-чек `POST /api/v1/hosts/{id}/status-check`.
 - Hosts: метод проверки статуса на хосте `check_method`: `ping`/`tcp`/`ssh` (по умолчанию `tcp`).
+- Advanced host health: snapshot (uptime/load/memory/disk) + history + facts через Ansible.
 - Группы хостов: static/dynamic, rule engine, пересчёт состава (воркером и вручную).
-- Vault-секреты (AES-GCM) с `/api/v1/secrets` и `/api/v1/secrets/{id}/reveal`, включая тип `private_key` с passphrase.
-- Automation (MVP): CRUD плейбуков (stored_content), запуск, очередь Redis, воркер-исполнитель `ansible-playbook`, история и live-логи (SSE).
+- Vault-секреты (AES-GCM) с `/api/v1/secrets` и `/api/v1/secrets/{id}/reveal`, включая тип `private_key` с passphrase, scope `global`, `expires_at`, rotation interval и ручную ротацию (`/api/v1/secrets/{id}/rotate`).
+- Automation: CRUD плейбуков, playbook templates/instances, запуск вручную/по расписанию, история и live-логи (SSE).
+- Approval flow для prod запусков: requester/approver, diff параметров, UI approvals.
+- Event-driven triggers: webhook, host created/tags changed, secret rotated.
 - Надёжность Automation: таймауты выполнения, ограниченные ретраи на временные сбои, watchdog зависших запусков (running слишком долго).
 - Расписания Automation (MVP): interval/cron, выполняются воркером (см. ADR 0002).
-- Audit log (MVP): события CRUD/SSH/Automation с просмотром в Settings (admin-only).
+- Audit log: события CRUD/SSH/Automation с фильтрами, экспортом и source IP (admin-only).
+- Notifications (webhook): события run/approval/host/secret на внешний URL.
 - React/Vite шаблон admin layout и Docker Compose окружение.
 - React/Vite страницы Dashboard + Hosts (таблица, карточка, форма).
 - React/Vite страницы Groups + Secrets + Settings (login/logout, reveal для admin, audit log).
 - Страница Terminal с WebSocket-подключением и xterm.js; backend терминал использует SSH с паролем или приватным ключом + passphrase (через Secret).
+- SSH session recording (metadata): длительность, актор, IP, статус.
+- Remote actions: reboot/restart service/fetch logs/upload file через Ansible.
 - Миграции Alembic: backend применяет `alembic upgrade head` при старте контейнера.
 - Healthcheck: `GET /healthz`.
+- UI: dashboard widgets, approval diff, compact tables, global search (Cmd/Ctrl+K).
 
 ## Projects / Tenants (как работает)
 
@@ -96,6 +103,30 @@ E2E тесты живут в `apps/frontend/tests-e2e` и поднимают в�
 - Secrets:
   - `scope=project` — секрет привязан к текущему проекту.
   - `scope=global` — секрет общий для всех проектов (project_id = NULL); виден в списке Secrets любого проекта, но создаётся/редактируется/раскрывается только admin.
+
+## Automation: approvals, triggers, webhooks (коротко)
+
+- Approval для prod: если среди целей есть хосты `environment=prod`, запуск создаётся в статусе pending и требует подтверждения admin.
+- Triggers:
+  - `host_created`, `host_tags_changed` — автозапуск по событиям хоста.
+  - `secret_rotated` — автозапуск при обновлении значения секрета (если секрет используется как credential у хостов).
+- Webhook: плейбук можно запускать по HTTP с токеном.
+
+### Webhook запуск плейбука
+
+1) Сгенерируйте токен (admin):
+
+`POST /api/v1/playbooks/{id}/webhook-token`
+
+2) Запуск:
+
+`POST /api/v1/playbooks/{id}/webhook?token=...`
+
+Body:
+
+```json
+{"host_ids":[1],"group_ids":[],"extra_vars":{"key":"value"},"dry_run":true}
+```
 
 ## Тесты (backend)
 
@@ -114,9 +145,9 @@ Integration-тесты: `docker compose -f deploy/docker-compose.yml exec -T -w 
 
 ## Что дальше
 
-- расширить auth (пользователи в БД, полноценный RBAC).
-- внедрить Alembic autogenerate и последующие миграции (после MVP idempotent init).
-- улучшить Automation: артефакты, ansible-runner, UI полировки.
-- покрыть критичные модули тестами и логами.
+- notifications (Slack/Telegram/Email).
+- secret rotation policies + интеграции (SSH/API tokens).
+- git integration для playbooks + auto-sync.
+- session recording для SSH и remote actions.
 
 > Вся платформа готова к запуску `docker compose -f deploy/docker-compose.yml up -d`.

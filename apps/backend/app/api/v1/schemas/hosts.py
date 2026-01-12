@@ -106,3 +106,27 @@ class HostHealthHistoryRead(BaseModel):
 
 class HostFactsUpdate(BaseModel):
     facts: Dict[str, Any]
+
+
+class SshSessionRead(BaseModel):
+    id: int
+    host_id: int
+    actor: str
+    source_ip: Optional[str] = None
+    started_at: datetime
+    finished_at: Optional[datetime] = None
+    duration_seconds: Optional[int] = None
+    success: bool
+    error: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class HostActionRequest(BaseModel):
+    action_type: str = Field(..., pattern="^(reboot|restart_service|fetch_logs|upload_file)$")
+    service_name: Optional[str] = None
+    log_path: Optional[str] = None
+    log_lines: Optional[int] = Field(default=200, ge=1, le=5000)
+    file_dest: Optional[str] = None
+    file_content: Optional[str] = None
+    file_mode: Optional[str] = None

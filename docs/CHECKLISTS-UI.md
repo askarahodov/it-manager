@@ -85,6 +85,31 @@
 - [x] Смена проекта: нет “протечки” данных (после переключения не остаются сущности прошлого проекта в списках/карточках).
 - [x] Ошибки 403/404 по проекту: показываются дружелюбно (toast + текст на странице), без бесконечных retries.
 
+## Automation: Approvals / Triggers / Webhooks (UI)
+
+- [x] Approvals: список запросов + approve/reject + комментарий.
+- [x] Approvals: просмотр diff параметров (before/after) в отдельном UI.
+- [x] Triggers: CRUD интерфейс (host_created/host_tags_changed/secret_rotated).
+- [x] Webhook: генерация/просмотр токена плейбука + подсказки.
+
+## Secrets: Rotation (UI)
+
+- [x] Поле `expires_at` и отображение в списке секретов.
+- [x] Политика ротации: interval (дни) + next rotation.
+- [x] Ручная ротация с вводом нового значения.
+
+## Notifications (UI)
+
+- [x] Webhook endpoints: CRUD + выбор событий.
+
+## SSH Sessions (UI)
+
+- [x] Отображение метаданных SSH-сессий на карточке хоста.
+
+## Remote Actions (UI)
+
+- [x] UI для remote actions на карточке хоста (reboot/restart/fetch logs/upload file).
+
 ## Что дальше
 
 - [x] Привести локализацию Hosts/filters к единому русскому словарю.

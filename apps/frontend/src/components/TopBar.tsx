@@ -9,6 +9,7 @@ import { useToast } from "./ui/ToastProvider";
 type Props = {
   sidebarOpen: boolean;
   onToggleSidebar: () => void;
+  onOpenSearch: () => void;
 };
 
 function pickDefaultProjectId(projects: Project[]): number | null {
@@ -16,7 +17,7 @@ function pickDefaultProjectId(projects: Project[]): number | null {
   return def?.id ?? (projects[0]?.id ?? null);
 }
 
-function TopBar({ sidebarOpen, onToggleSidebar }: Props) {
+function TopBar({ sidebarOpen, onToggleSidebar, onOpenSearch }: Props) {
   const { user, status, token } = useAuth();
   const { pushToast } = useToast();
 
@@ -104,6 +105,9 @@ function TopBar({ sidebarOpen, onToggleSidebar }: Props) {
           </select>
           {projectsError && <span className="top-project-hint text-error">Проекты недоступны: {projectsError}</span>}
         </div>
+        <button type="button" className="ghost-button search-button" onClick={onOpenSearch}>
+          Поиск <span className="search-hint">Ctrl+K</span>
+        </button>
       </div>
       <div className="status-pill">Alpha</div>
       <div className="top-user">{status === "authenticated" && user ? `${user.email} (${user.role})` : "не авторизован"}</div>

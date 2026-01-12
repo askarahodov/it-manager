@@ -13,6 +13,7 @@ from app.db.models import GroupType, Host, HostGroup, JobRun, JobStatus, Playboo
 from app.db.models import ApprovalRequest, ApprovalStatus
 from app.services.access import apply_group_scope, apply_host_scope
 from app.services.audit import audit_log
+from app.services.notifications import notify_event
 from app.services.queue import enqueue_run
 
 logger = logging.getLogger(__name__)
@@ -393,6 +394,12 @@ async def run_playbook(
             entity_type="run",
             entity_id=run.id,
             meta={"playbook_id": playbook_id, "targets": len(snapshot_hosts), "approval_id": approval.id},
+        )
+        await notify_event(
+            db,
+            project_id=project_id,
+            event="approval.requested",
+            payload={"approval_id": approval.id, "run_id": run.id, "playbook_id": playbook_id},
         )
     else:
         await enqueue_run(run.id, project_id=project_id)

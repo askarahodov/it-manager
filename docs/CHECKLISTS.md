@@ -79,24 +79,27 @@
 - [x] event triggers: secret rotated
 
 ### Secrets Enterprise
-- [ ] rotation policies (manual/scheduled) + интеграции (SSH password / API token)
+- [x] rotation policies (manual) + интервалы
+- [ ] rotation policies (scheduled) + фоновые задачи
+- [ ] интеграции rotation (SSH password / API token)
 - [ ] уведомления: expiring soon / rotated
 - [ ] dynamic secrets (опционально): TTL creds + auto revoke
 
 ### SSH & Remote Ops
-- [ ] SSH session recording (metadata): duration/user/host/success/error
+- [x] SSH session recording (metadata): duration/user/host/success/error
 - [ ] optional full session recording (флаг + предупреждение)
-- [ ] remote actions: reboot/restart/fetch logs/upload file (через ansible ad-hoc)
+- [x] remote actions: reboot/restart/fetch logs/upload file (через ansible ad-hoc)
 
 ### UI/UX
-- [ ] global search + Cmd/Ctrl+K quick actions
+- [x] global search + Cmd/Ctrl+K quick actions
 - [x] dashboard widgets (status/runs/schedules/ssh activity)
 - [x] dashboard widgets: expiring secrets
 - [x] audit log UI: фильтры + экспорт + before/after + source/IP
 
 ### Интеграции и Ops
 - [ ] git integration: auto-sync + commit hash в execution history
+- [x] notifications: outbound webhook
 - [ ] notifications: Slack/Telegram/Email
-- [ ] webhooks (inbound/outbound)
+- [x] webhooks (inbound/outbound)
 - [ ] plugin system (inventory/secrets/automation backends)
 - [ ] scale/HA: multiple workers + distributed locks + sharding

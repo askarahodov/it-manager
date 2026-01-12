@@ -39,6 +39,18 @@ type HostHealthRecord = {
   checked_at: string;
 };
 
+type SshSession = {
+  id: number;
+  host_id: number;
+  actor: string;
+  source_ip?: string | null;
+  started_at: string;
+  finished_at?: string | null;
+  duration_seconds?: number | null;
+  success: boolean;
+  error?: string | null;
+};
+
 type HostFormState = {
   name: string;
   hostname: string;
@@ -102,9 +114,17 @@ function HostDetailsPage({ hostId }: { hostId: number }) {
   const [host, setHost] = useState<Host | null>(null);
   const [secrets, setSecrets] = useState<SecretOption[]>([]);
   const [healthHistory, setHealthHistory] = useState<HostHealthRecord[]>([]);
+  const [sshSessions, setSshSessions] = useState<SshSession[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [factsLoading, setFactsLoading] = useState(false);
+  const [actionType, setActionType] = useState<"reboot" | "restart_service" | "fetch_logs" | "upload_file">("reboot");
+  const [actionService, setActionService] = useState("");
+  const [actionLogPath, setActionLogPath] = useState("/var/log/syslog");
+  const [actionLogLines, setActionLogLines] = useState("200");
+  const [actionFileDest, setActionFileDest] = useState("/tmp/remote.txt");
+  const [actionFileContent, setActionFileContent] = useState("");
+  const [actionFileMode, setActionFileMode] = useState("0644");
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState<HostFormState | null>(null);
 
@@ -135,15 +155,17 @@ function HostDetailsPage({ hostId }: { hostId: number }) {
     setLoading(true);
     setError(null);
     try {
-      const [h, sec, hh] = await Promise.all([
+      const [h, sec, hh, ss] = await Promise.all([
         apiFetch<Host>(`/api/v1/hosts/${hostId}`, { token }),
         apiFetch<SecretOption[]>("/api/v1/secrets/", { token }),
         apiFetch<HostHealthRecord[]>(`/api/v1/hosts/${hostId}/health-history`, { token }),
+        apiFetch<SshSession[]>(`/api/v1/hosts/${hostId}/ssh-sessions`, { token }),
       ]);
       setHost(h);
       syncFormFromHost(h);
       setSecrets(sec);
       setHealthHistory(hh);
+      setSshSessions(ss);
     } catch (err) {
       const msg = formatError(err);
       setError(msg);
@@ -264,6 +286,38 @@ function HostDetailsPage({ hostId }: { hostId: number }) {
       pushToast({ title: "Ошибка запуска facts", description: msg, variant: "error" });
     } finally {
       setFactsLoading(false);
+    }
+  };
+
+  const runRemoteAction = async () => {
+    if (!token) return;
+    setError(null);
+    try {
+      if (!canRunAutomation) {
+        throw new Error("Недостаточно прав для remote actions (нужна роль admin/operator/automation-only).");
+      }
+      const payload: Record<string, unknown> = { action_type: actionType };
+      if (actionType === "restart_service") payload.service_name = actionService;
+      if (actionType === "fetch_logs") {
+        payload.log_path = actionLogPath;
+        payload.log_lines = Number(actionLogLines || "200");
+      }
+      if (actionType === "upload_file") {
+        payload.file_dest = actionFileDest;
+        payload.file_content = actionFileContent;
+        payload.file_mode = actionFileMode || "0644";
+      }
+      const run = await apiFetch<{ id: number }>(`/api/v1/hosts/${hostId}/actions`, {
+        method: "POST",
+        token,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      pushToast({ title: "Remote action запущен", description: `Run #${run.id}`, variant: "success" });
+    } catch (err) {
+      const msg = formatError(err);
+      setError(msg);
+      pushToast({ title: "Ошибка remote action", description: msg, variant: "error" });
     }
   };
 
@@ -529,6 +583,99 @@ function HostDetailsPage({ hostId }: { hostId: number }) {
                       </tbody>
                     </table>
                   )}
+                </div>
+                <div className="panel">
+                  <div className="panel-title">
+                    <h2>SSH сессии</h2>
+                  </div>
+                  {sshSessions.length === 0 && <p className="form-helper">Сессий пока нет.</p>}
+                  {sshSessions.length > 0 && (
+                    <table className="hosts-table">
+                      <thead>
+                        <tr>
+                          <th>Старт</th>
+                          <th>Длительность</th>
+                          <th>Actor</th>
+                          <th>IP</th>
+                          <th>OK</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {sshSessions.map((row) => (
+                          <tr key={row.id}>
+                            <td>{new Date(row.started_at).toLocaleString()}</td>
+                            <td>{row.duration_seconds ? `${row.duration_seconds}s` : "—"}</td>
+                            <td>{row.actor}</td>
+                            <td>{row.source_ip ?? "—"}</td>
+                            <td>{row.success ? "yes" : "no"}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+                <div className="panel">
+                  <div className="panel-title">
+                    <h2>Remote actions</h2>
+                    <p className="form-helper">Выполняются через Ansible (playbook _remote_actions).</p>
+                  </div>
+                  <div className="form-stack">
+                    <label>
+                      Тип действия
+                      <select value={actionType} onChange={(e) => setActionType(e.target.value as typeof actionType)} disabled={!canRunAutomation}>
+                        <option value="reboot">reboot</option>
+                        <option value="restart_service">restart_service</option>
+                        <option value="fetch_logs">fetch_logs</option>
+                        <option value="upload_file">upload_file</option>
+                      </select>
+                    </label>
+                    {actionType === "restart_service" && (
+                      <label>
+                        Service name
+                        <input value={actionService} onChange={(e) => setActionService(e.target.value)} disabled={!canRunAutomation} />
+                      </label>
+                    )}
+                    {actionType === "fetch_logs" && (
+                      <>
+                        <label>
+                          Log path
+                          <input value={actionLogPath} onChange={(e) => setActionLogPath(e.target.value)} disabled={!canRunAutomation} />
+                        </label>
+                        <label>
+                          Lines
+                          <input
+                            type="number"
+                            min={10}
+                            max={5000}
+                            value={actionLogLines}
+                            onChange={(e) => setActionLogLines(e.target.value)}
+                            disabled={!canRunAutomation}
+                          />
+                        </label>
+                      </>
+                    )}
+                    {actionType === "upload_file" && (
+                      <>
+                        <label>
+                          Destination
+                          <input value={actionFileDest} onChange={(e) => setActionFileDest(e.target.value)} disabled={!canRunAutomation} />
+                        </label>
+                        <label>
+                          Content
+                          <textarea value={actionFileContent} onChange={(e) => setActionFileContent(e.target.value)} rows={4} disabled={!canRunAutomation} />
+                        </label>
+                        <label>
+                          Mode
+                          <input value={actionFileMode} onChange={(e) => setActionFileMode(e.target.value)} disabled={!canRunAutomation} />
+                        </label>
+                      </>
+                    )}
+                    <div className="row-actions">
+                      <button type="button" className="primary-button" onClick={runRemoteAction} disabled={!canRunAutomation}>
+                        Запустить
+                      </button>
+                    </div>
+                  </div>
                 </div>
               </div>
             ) : (

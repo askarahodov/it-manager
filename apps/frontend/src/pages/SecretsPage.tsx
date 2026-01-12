@@ -18,6 +18,9 @@ type Secret = {
   description?: string | null;
   tags: Record<string, string>;
   expires_at?: string | null;
+  rotation_interval_days?: number | null;
+  last_rotated_at?: string | null;
+  next_rotated_at?: string | null;
   created_at: string;
 };
 
@@ -28,6 +31,7 @@ type SecretFormState = {
   description: string;
   tags: string;
   expires_at: string;
+  rotation_interval_days: string;
   value: string;
   passphrase: string;
 };
@@ -39,6 +43,7 @@ const defaultForm: SecretFormState = {
   description: "",
   tags: "",
   expires_at: "",
+  rotation_interval_days: "",
   value: "",
   passphrase: "",
 };
@@ -82,6 +87,9 @@ function SecretsPage() {
   const [form, setForm] = useState<SecretFormState>(defaultForm);
   const [revealValue, setRevealValue] = useState<string | null>(null);
   const [editId, setEditId] = useState<number | null>(null);
+  const [rotateId, setRotateId] = useState<number | null>(null);
+  const [rotateValue, setRotateValue] = useState("");
+  const [rotatePassphrase, setRotatePassphrase] = useState("");
 
   const isAdmin = user?.role === "admin";
   const canReveal = isAdmin;
@@ -146,6 +154,11 @@ function SecretsPage() {
         payload.expires_at = toIsoDate(form.expires_at);
       } else {
         payload.expires_at = null;
+      }
+      if (form.rotation_interval_days) {
+        payload.rotation_interval_days = Number(form.rotation_interval_days);
+      } else {
+        payload.rotation_interval_days = null;
       }
       if (form.value) {
         payload.value = form.value;
@@ -234,6 +247,7 @@ function SecretsPage() {
         .map(([k, v]) => `${k}=${v}`)
         .join(", "),
       expires_at: toInputDate(secret.expires_at),
+      rotation_interval_days: secret.rotation_interval_days ? String(secret.rotation_interval_days) : "",
       value: "",
       passphrase: "",
     });
@@ -245,6 +259,41 @@ function SecretsPage() {
     setForm({ ...defaultForm });
     setError(null);
     setRevealValue(null);
+  };
+
+  const startRotate = (secret: Secret) => {
+    setRotateId(secret.id);
+    setRotateValue("");
+    setRotatePassphrase("");
+  };
+
+  const performRotate = async () => {
+    if (!token || !rotateId) return;
+    if (!rotateValue) {
+      const msg = "Введите новое значение для ротации.";
+      setError(msg);
+      pushToast({ title: "Ошибка ротации", description: msg, variant: "error" });
+      return;
+    }
+    try {
+      const payload: Record<string, unknown> = { value: rotateValue };
+      if (rotatePassphrase) payload.passphrase = rotatePassphrase;
+      const rotated = await apiFetch<Secret>(`/api/v1/secrets/${rotateId}/rotate`, {
+        method: "POST",
+        token,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      setSecrets((prev) => prev.map((s) => (s.id === rotated.id ? rotated : s)));
+      setRotateId(null);
+      setRotateValue("");
+      setRotatePassphrase("");
+      pushToast({ title: "Секрет ротирован", description: rotated.name, variant: "success" });
+    } catch (err) {
+      const msg = formatError(err);
+      setError(msg);
+      pushToast({ title: "Ошибка ротации", description: msg, variant: "error" });
+    }
   };
 
   if (!token || status === "anonymous") {
@@ -297,6 +346,7 @@ function SecretsPage() {
                     <th>Тип</th>
                     <th>Scope</th>
                     <th>Истекает</th>
+                    <th>Ротация</th>
                     <th>Действия</th>
                   </tr>
                 </thead>
@@ -304,6 +354,7 @@ function SecretsPage() {
                   {Array.from({ length: 5 }).map((_, idx) => (
                     <tr key={`skeleton-secret-${idx}`}>
                       <td><span className="skeleton-line" /></td>
+                      <td><span className="skeleton-line small" /></td>
                       <td><span className="skeleton-line small" /></td>
                       <td><span className="skeleton-line small" /></td>
                       <td><span className="skeleton-line small" /></td>
@@ -323,6 +374,7 @@ function SecretsPage() {
                     <th>Тип</th>
                     <th>Scope</th>
                     <th>Истекает</th>
+                    <th>Ротация</th>
                     <th>Действия</th>
                   </tr>
                 </thead>
@@ -333,6 +385,7 @@ function SecretsPage() {
                       <td>{secret.type}</td>
                       <td>{scopeLabel(secret)}</td>
                       <td>{secret.expires_at ? new Date(secret.expires_at).toLocaleDateString() : "—"}</td>
+                      <td>{secret.next_rotated_at ? new Date(secret.next_rotated_at).toLocaleDateString() : "—"}</td>
                       <td>
                         <div className="row-actions">
                           <button
@@ -361,6 +414,15 @@ function SecretsPage() {
                             title={isAdmin ? "Удалить" : "Требуется роль admin"}
                           >
                             Удалить
+                          </button>
+                          <button
+                            type="button"
+                            className="ghost-button"
+                            disabled={!isAdmin}
+                            onClick={() => startRotate(secret)}
+                            title={isAdmin ? "Ротация секрета" : "Требуется роль admin"}
+                          >
+                            Ротация
                           </button>
                         </div>
                       </td>
@@ -429,6 +491,17 @@ function SecretsPage() {
               />
               <span className="form-helper">Оставьте пустым, если срок не задан.</span>
             </label>
+            <label>
+              Интервал ротации (дней)
+              <input
+                type="number"
+                min={1}
+                value={form.rotation_interval_days}
+                onChange={(e) => setForm((prev) => ({ ...prev, rotation_interval_days: e.target.value }))}
+                disabled={!isAdmin}
+              />
+              <span className="form-helper">Если задан — планируется next rotation.</span>
+            </label>
           <label>
             Значение
             {form.type === "private_key" ? (
@@ -462,6 +535,27 @@ function SecretsPage() {
               </button>
             )}
           </form>
+          {rotateId && (
+            <div className="panel small">
+              <h3>Ротация секрета</h3>
+              <label>
+                Новое значение
+                <input value={rotateValue} onChange={(e) => setRotateValue(e.target.value)} disabled={!isAdmin} />
+              </label>
+              <label>
+                Passphrase (если private_key)
+                <input value={rotatePassphrase} onChange={(e) => setRotatePassphrase(e.target.value)} disabled={!isAdmin} />
+              </label>
+              <div className="row-actions">
+                <button type="button" className="primary-button" onClick={performRotate} disabled={!isAdmin}>
+                  Ротировать
+                </button>
+                <button type="button" className="ghost-button" onClick={() => setRotateId(null)}>
+                  Отмена
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

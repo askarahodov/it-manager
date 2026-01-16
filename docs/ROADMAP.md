@@ -103,3 +103,22 @@
 - [x] admin settings: глобальные настройки инстанса (maintenance/banner/default project)
 - [x] plugin system (inventory/secrets/automation backends)
 - [ ] HA/scale: multiple workers, distributed locks, sharding
+- [ ] HA/scale: multi-region + sticky sessions + session store
+- [ ] HA/scale: read replicas + split writes/reads
+- [ ] HA/scale: object storage для артефактов (S3/minio)
+
+## Фаза 16: Enterprise Security & Compliance
+- [ ] SSO (OIDC/SAML) + MFA
+- [ ] SCIM/LDAP provisioning + deprovisioning
+- [ ] audit log retention/WORM + экспорт в SIEM
+- [ ] политика password/secret rotation + отчёты соответствия
+
+## Фаза 17: Reliability & DR
+- [ ] резервное копирование (DB + артефакты) и проверка восстановления
+- [ ] DR runbooks + автоматизированный failover
+- [ ] chaos drills (ограниченные) для критичных сценариев
+
+## Фаза 18: Developer Platform
+- [ ] публичный OpenAPI + стабильные версии API
+- [ ] SDK (Go/Python) + CLI
+- [ ] Terraform provider + examples

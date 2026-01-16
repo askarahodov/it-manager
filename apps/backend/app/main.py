@@ -11,7 +11,7 @@ from app.core.logging import setup_logging
 from app.core.request_id import new_request_id, set_request_id
 from app.db import engine
 from app.db import async_session
-from app.services.bootstrap import ensure_bootstrap_admin, ensure_default_project
+from app.services.bootstrap import ensure_bootstrap_admin, ensure_default_project, ensure_worker_user
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -27,6 +27,7 @@ async def lifespan(app: FastAPI):
         try:
             await ensure_bootstrap_admin(db, settings.bootstrap_admin_email, settings.bootstrap_admin_password)
             await ensure_default_project(db)
+            await ensure_worker_user(db)
         except Exception as exc:  # noqa: BLE001
             logging.getLogger(__name__).warning("Bootstrap admin failed: %s", exc)
     yield

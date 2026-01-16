@@ -11,13 +11,17 @@ depends_on = None
 
 
 def upgrade() -> None:
-    plugin_type = sa.Enum("inventory", "secrets", "automation", name="plugintype")
-    plugin_type.create(op.get_bind(), checkfirst=True)
+    op.execute(
+        "DO $$ BEGIN "
+        "CREATE TYPE plugintype AS ENUM ('inventory', 'secrets', 'automation'); "
+        "EXCEPTION WHEN duplicate_object THEN NULL; "
+        "END $$;"
+    )
     op.create_table(
         "plugin_instances",
         sa.Column("id", sa.Integer(), primary_key=True),
         sa.Column("project_id", sa.Integer(), sa.ForeignKey("projects.id"), nullable=False),
-        sa.Column("type", plugin_type, nullable=False),
+        sa.Column("type", postgresql.ENUM("inventory", "secrets", "automation", name="plugintype", create_type=False), nullable=False),
         sa.Column("definition_id", sa.String(), nullable=False),
         sa.Column("name", sa.String(), nullable=False),
         sa.Column("enabled", sa.Boolean(), nullable=False, server_default=sa.text("true")),

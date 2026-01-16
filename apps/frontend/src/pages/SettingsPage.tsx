@@ -177,6 +177,19 @@ function SettingsPage() {
     () => (accessUserId ? users.find((u) => u.id === accessUserId) ?? null : null),
     [accessUserId, users]
   );
+  const settingsHelpHref = useMemo(() => {
+    const base = "/docs/user-guide.html";
+    const map: Record<string, string> = {
+      session: `${base}#settings-session`,
+      projects: `${base}#settings-projects`,
+      users: `${base}#settings-users`,
+      audit: `${base}#settings-audit`,
+      notifications: `${base}#settings-notifications`,
+      plugins: `${base}#settings-plugins`,
+      admin: `${base}#settings-admin`,
+    };
+    return map[settingsTab] ?? `${base}#settings`;
+  }, [settingsTab]);
   const availablePluginDefinitions = useMemo(
     () => pluginDefinitions.filter((item) => item.type === pluginType),
     [pluginDefinitions, pluginType]
@@ -428,7 +441,7 @@ function SettingsPage() {
       title: "Удалить плагин?",
       description: `Удалить ${instance.name}? Это не удалит данные, только конфигурацию плагина.`,
       confirmText: "Удалить",
-      tone: "danger",
+      danger: true,
     });
     if (!ok) return;
     try {
@@ -904,10 +917,64 @@ function SettingsPage() {
           </>
         )}
       </div>
+      <div className="row-actions" style={{ justifyContent: "flex-end" }}>
+        <a
+          className="help-link"
+          href={settingsHelpHref}
+          target="_blank"
+          rel="noreferrer"
+          aria-label="Справка по Settings"
+          title="Справка по Settings"
+        >
+          ?
+        </a>
+      </div>
+      {settingsTab === "session" && (
+        <div className="section-nav">
+          <a href="#session-panel">Сессия</a>
+        </div>
+      )}
+      {settingsTab === "projects" && (
+        <div className="section-nav">
+          <a href="#projects-current">Текущий проект</a>
+          <a href="#projects-create">Создать проект</a>
+          <a href="#projects-list">Список проектов</a>
+        </div>
+      )}
+      {settingsTab === "users" && (
+        <div className="section-nav">
+          <a href="#users-list">Пользователи</a>
+          <a href="#users-access">Ограничения доступа</a>
+          <a href="#users-create">Создать пользователя</a>
+        </div>
+      )}
+      {settingsTab === "audit" && (
+        <div className="section-nav">
+          <a href="#audit-filters">Фильтры</a>
+          <a href="#audit-list">Журнал</a>
+        </div>
+      )}
+      {settingsTab === "notifications" && (
+        <div className="section-nav">
+          <a href="#notifications-list">Endpoints</a>
+          <a href="#notifications-form">Создать/редактировать</a>
+        </div>
+      )}
+      {settingsTab === "plugins" && (
+        <div className="section-nav">
+          <a href="#plugins-list">Инстансы</a>
+          <a href="#plugins-form">Создать/редактировать</a>
+        </div>
+      )}
+      {settingsTab === "admin" && (
+        <div className="section-nav">
+          <a href="#admin-settings">Глобальные настройки</a>
+        </div>
+      )}
 
       <div className="grid">
           {settingsTab === "session" && (
-          <div className="panel">
+          <div className="panel section-anchor" id="session-panel">
             <h2>Сессия</h2>
             {status === "authenticated" && user ? (
               <div className="stack">
@@ -956,7 +1023,7 @@ function SettingsPage() {
         )}
 
         {settingsTab === "projects" && status === "authenticated" && token && (
-          <div className="panel">
+          <div className="panel section-anchor" id="projects-current">
             <div className="panel-title">
               <h2>Проекты</h2>
               <p className="form-helper">Проект влияет на Hosts/Groups/Secrets/Automation (изоляция данных).</p>
@@ -991,7 +1058,7 @@ function SettingsPage() {
 
             {user?.role === "admin" && (
               <>
-                <div className="panel" style={{ marginTop: "1rem" }}>
+                <div className="panel section-anchor" id="projects-create" style={{ marginTop: "1rem" }}>
                   <div className="panel-title">
                     <h3 style={{ margin: 0 }}>Создать проект</h3>
                     <p className="form-helper">Удаление проекта удаляет все сущности внутри него.</p>
@@ -1012,7 +1079,7 @@ function SettingsPage() {
                 </div>
 
                 {projects.length > 0 && (
-                  <div className="table-scroll" tabIndex={0} aria-label="Список проектов" style={{ marginTop: "1rem" }}>
+                  <div className="table-scroll section-anchor" id="projects-list" tabIndex={0} aria-label="Список проектов" style={{ marginTop: "1rem" }}>
                     <table className="hosts-table">
                       <thead>
                         <tr>
@@ -1069,7 +1136,7 @@ function SettingsPage() {
         )}
 
         {settingsTab === "users" && status === "authenticated" && user?.role === "admin" && (
-          <div className="panel">
+          <div className="panel section-anchor" id="users-list">
             <div className="panel-title">
               <h2>Пользователи</h2>
               <p className="form-helper">Управление учетными записями (RBAC).</p>
@@ -1140,7 +1207,7 @@ function SettingsPage() {
             )}
 
             {selectedAccessUser && (
-              <div className="panel" style={{ marginTop: "1rem" }}>
+              <div className="panel section-anchor" id="users-access" style={{ marginTop: "1rem" }}>
                 <div className="panel-title">
                   <h2>Ограничения доступа</h2>
                   <p className="form-helper">Пользователь: {selectedAccessUser.email}</p>
@@ -1240,7 +1307,7 @@ function SettingsPage() {
               </div>
             )}
 
-            <div className="panel" style={{ marginTop: "1rem" }}>
+            <div className="panel section-anchor" id="users-create" style={{ marginTop: "1rem" }}>
               <div className="panel-title">
                 <h2>Создать пользователя</h2>
                 <p className="form-helper">Пароль хранится как bcrypt hash.</p>
@@ -1361,7 +1428,7 @@ function SettingsPage() {
                 Экспорт CSV
               </button>
             </div>
-            <div className="grid" style={{ marginTop: "0.75rem" }}>
+            <div className="grid section-anchor" id="audit-filters" style={{ marginTop: "0.75rem" }}>
               <label>
                 Action
                 <input value={auditAction} onChange={(e) => setAuditAction(e.target.value)} placeholder="host.update" />
@@ -1411,7 +1478,7 @@ function SettingsPage() {
             {auditError && <p className="text-error">{auditError}</p>}
             {!auditLoading && audit.length === 0 && <p>Событий пока нет</p>}
             {audit.length > 0 && (
-              <div className="table-scroll" tabIndex={0} aria-label="Audit log">
+              <div className="table-scroll section-anchor" id="audit-list" tabIndex={0} aria-label="Audit log">
                 <table className="hosts-table">
                   <thead>
                     <tr>
@@ -1471,7 +1538,7 @@ function SettingsPage() {
             {notificationError && <p className="text-error">{notificationError}</p>}
             {notificationEndpoints.length === 0 && !notificationLoading && <p>Webhook endpoints пока нет</p>}
             {notificationEndpoints.length > 0 && (
-              <div className="table-scroll" tabIndex={0} aria-label="Notification endpoints">
+              <div className="table-scroll section-anchor" id="notifications-list" tabIndex={0} aria-label="Notification endpoints">
                 <table className="hosts-table">
                   <thead>
                     <tr>
@@ -1508,65 +1575,75 @@ function SettingsPage() {
               </div>
             )}
 
-            <div className="panel" style={{ marginTop: "1rem" }}>
+            <div className="panel section-anchor" id="notifications-form" style={{ marginTop: "1rem" }}>
               <div className="panel-title">
                 <h2>{notifEditId ? "Редактировать webhook" : "Создать webhook"}</h2>
               </div>
-              <div className="form-stack">
-                <label>
-                  Название
-                  <input value={notifName} onChange={(e) => setNotifName(e.target.value)} required />
-                </label>
-                <label>
-                  Тип
-                  <select value={notifType} onChange={(e) => setNotifType(e.target.value)}>
-                    <option value="webhook">webhook</option>
-                    <option value="slack">slack</option>
-                    <option value="telegram">telegram</option>
-                    <option value="email">email</option>
-                  </select>
-                  <span className="form-helper">Slack/Telegram используют URL webhook; email — адрес получателя.</span>
-                </label>
-                <label>
-                  URL
-                  <input value={notifUrl} onChange={(e) => setNotifUrl(e.target.value)} required />
-                  {notifType === "email" && <span className="form-helper">Пример: user@example.com</span>}
-                </label>
-                <label>
-                  Secret (опционально)
-                  <input value={notifSecret} onChange={(e) => setNotifSecret(e.target.value)} placeholder="X-Webhook-Secret" />
-                </label>
-                <label>
-                  События
-                  <select
-                    multiple
-                    value={notifEvents}
-                    onChange={(e) => setNotifEvents(Array.from(e.target.selectedOptions).map((o) => o.value))}
-                    style={{ minHeight: 140 }}
-                  >
-                    {NOTIFICATION_EVENTS.map((event) => (
-                      <option key={event} value={event}>
-                        {event}
-                      </option>
-                    ))}
-                  </select>
-                  <span className="form-helper">Если ничего не выбрано — будут отправляться все события.</span>
-                </label>
-                <label>
-                  Статус
-                  <select value={notifEnabled ? "enabled" : "disabled"} onChange={(e) => setNotifEnabled(e.target.value === "enabled")}>
-                    <option value="enabled">enabled</option>
-                    <option value="disabled">disabled</option>
-                  </select>
-                </label>
-                <div className="row-actions">
-                  <button type="button" className="primary-button" onClick={submitNotification} disabled={!notifName || !notifUrl}>
-                    Сохранить
-                  </button>
-                  <button type="button" className="ghost-button" onClick={resetNotificationForm}>
-                    Сброс
-                  </button>
+              <div className="form-grid">
+                <div className="form-section">
+                  <h3>Основное</h3>
+                  <div className="form-stack">
+                    <label>
+                      Название
+                      <input value={notifName} onChange={(e) => setNotifName(e.target.value)} required />
+                    </label>
+                    <label>
+                      Тип
+                      <select value={notifType} onChange={(e) => setNotifType(e.target.value)}>
+                        <option value="webhook">webhook</option>
+                        <option value="slack">slack</option>
+                        <option value="telegram">telegram</option>
+                        <option value="email">email</option>
+                      </select>
+                      <span className="form-helper">Slack/Telegram используют URL webhook; email — адрес получателя.</span>
+                    </label>
+                    <label>
+                      URL
+                      <input value={notifUrl} onChange={(e) => setNotifUrl(e.target.value)} required />
+                      {notifType === "email" && <span className="form-helper">Пример: user@example.com</span>}
+                    </label>
+                    <label>
+                      Secret (опционально)
+                      <input value={notifSecret} onChange={(e) => setNotifSecret(e.target.value)} placeholder="X-Webhook-Secret" />
+                    </label>
+                  </div>
                 </div>
+                <div className="form-section form-span-2">
+                  <h3>События и статус</h3>
+                  <div className="form-stack">
+                    <label>
+                      События
+                      <select
+                        multiple
+                        value={notifEvents}
+                        onChange={(e) => setNotifEvents(Array.from(e.target.selectedOptions).map((o) => o.value))}
+                        style={{ minHeight: 140 }}
+                      >
+                        {NOTIFICATION_EVENTS.map((event) => (
+                          <option key={event} value={event}>
+                            {event}
+                          </option>
+                        ))}
+                      </select>
+                      <span className="form-helper">Если ничего не выбрано — будут отправляться все события.</span>
+                    </label>
+                    <label>
+                      Статус
+                      <select value={notifEnabled ? "enabled" : "disabled"} onChange={(e) => setNotifEnabled(e.target.value === "enabled")}>
+                        <option value="enabled">enabled</option>
+                        <option value="disabled">disabled</option>
+                      </select>
+                    </label>
+                  </div>
+                </div>
+              </div>
+              <div className="form-actions">
+                <button type="button" className="primary-button" onClick={submitNotification} disabled={!notifName || !notifUrl}>
+                  Сохранить
+                </button>
+                <button type="button" className="ghost-button" onClick={resetNotificationForm}>
+                  Сброс
+                </button>
               </div>
             </div>
           </div>
@@ -1587,7 +1664,7 @@ function SettingsPage() {
             {pluginError && <p className="text-error">{pluginError}</p>}
             {!pluginLoading && pluginInstances.length === 0 && <p>Плагины пока не настроены</p>}
             {pluginInstances.length > 0 && (
-              <div className="table-scroll" tabIndex={0} aria-label="Plugin instances">
+              <div className="table-scroll section-anchor" id="plugins-list" tabIndex={0} aria-label="Plugin instances">
                 <table className="hosts-table">
                   <thead>
                     <tr>
@@ -1627,77 +1704,89 @@ function SettingsPage() {
               </div>
             )}
 
-            <div className="panel" style={{ marginTop: "1rem" }}>
+            <div className="panel section-anchor" id="plugins-form" style={{ marginTop: "1rem" }}>
               <div className="panel-title">
                 <h2>{pluginEditId ? "Редактировать plugin instance" : "Создать plugin instance"}</h2>
                 {selectedPluginDefinition?.description && (
                   <p className="form-helper">{selectedPluginDefinition.description}</p>
                 )}
               </div>
-              <div className="form-stack">
-                <label>
-                  Название
-                  <input value={pluginName} onChange={(e) => setPluginName(e.target.value)} placeholder="prod-secrets" />
-                </label>
-                <label>
-                  Тип
-                  <select
-                    value={pluginType}
-                    onChange={(e) => setPluginType(e.target.value as PluginInstance["type"])}
-                    disabled={pluginEditId !== null}
-                  >
-                    <option value="inventory">inventory</option>
-                    <option value="secrets">secrets</option>
-                    <option value="automation">automation</option>
-                  </select>
-                </label>
-                <label>
-                  Definition
-                  <select
-                    value={pluginDefinitionId}
-                    onChange={(e) => setPluginDefinitionId(e.target.value)}
-                    disabled={pluginEditId !== null}
-                  >
-                    {availablePluginDefinitions.map((item) => (
-                      <option key={item.id} value={item.id}>
-                        {item.name}
-                      </option>
-                    ))}
-                  </select>
-                  {!availablePluginDefinitions.length && <span className="form-helper">Нет доступных definitions для выбранного типа.</span>}
-                </label>
-                <label>
-                  Config (JSON)
-                  <textarea
-                    rows={6}
-                    value={pluginConfig}
-                    onChange={(e) => setPluginConfig(e.target.value)}
-                    spellCheck={false}
-                  />
-                </label>
-                <label className="checkbox-row">
-                  <input type="checkbox" checked={pluginEnabled} onChange={(e) => setPluginEnabled(e.target.checked)} />
-                  <span>Enabled</span>
-                </label>
-                <label className="checkbox-row">
-                  <input type="checkbox" checked={pluginDefault} onChange={(e) => setPluginDefault(e.target.checked)} />
-                  <span>Default для выбранного типа</span>
-                </label>
-                <div className="row-actions">
-                  <button type="button" className="primary-button" onClick={handlePluginSubmit}>
-                    Сохранить
-                  </button>
-                  <button type="button" className="ghost-button" onClick={resetPluginForm}>
-                    Сброс
-                  </button>
+              <div className="form-grid">
+                <div className="form-section">
+                  <h3>Основное</h3>
+                  <div className="form-stack">
+                    <label>
+                      Название
+                      <input value={pluginName} onChange={(e) => setPluginName(e.target.value)} placeholder="prod-secrets" />
+                    </label>
+                    <label>
+                      Тип
+                      <select
+                        value={pluginType}
+                        onChange={(e) => setPluginType(e.target.value as PluginInstance["type"])}
+                        disabled={pluginEditId !== null}
+                      >
+                        <option value="inventory">inventory</option>
+                        <option value="secrets">secrets</option>
+                        <option value="automation">automation</option>
+                      </select>
+                    </label>
+                    <label>
+                      Definition
+                      <select
+                        value={pluginDefinitionId}
+                        onChange={(e) => setPluginDefinitionId(e.target.value)}
+                        disabled={pluginEditId !== null}
+                      >
+                        {availablePluginDefinitions.map((item) => (
+                          <option key={item.id} value={item.id}>
+                            {item.name}
+                          </option>
+                        ))}
+                      </select>
+                      {!availablePluginDefinitions.length && <span className="form-helper">Нет доступных definitions для выбранного типа.</span>}
+                    </label>
+                  </div>
                 </div>
+                <div className="form-section form-span-2">
+                  <h3>Config (JSON)</h3>
+                  <div className="form-stack">
+                    <textarea
+                      rows={6}
+                      value={pluginConfig}
+                      onChange={(e) => setPluginConfig(e.target.value)}
+                      spellCheck={false}
+                    />
+                  </div>
+                </div>
+                <div className="form-section form-span-2">
+                  <h3>Статус</h3>
+                  <div className="form-stack">
+                    <label className="checkbox-row">
+                      <input type="checkbox" checked={pluginEnabled} onChange={(e) => setPluginEnabled(e.target.checked)} />
+                      <span>Enabled</span>
+                    </label>
+                    <label className="checkbox-row">
+                      <input type="checkbox" checked={pluginDefault} onChange={(e) => setPluginDefault(e.target.checked)} />
+                      <span>Default для выбранного типа</span>
+                    </label>
+                  </div>
+                </div>
+              </div>
+              <div className="form-actions">
+                <button type="button" className="primary-button" onClick={handlePluginSubmit}>
+                  Сохранить
+                </button>
+                <button type="button" className="ghost-button" onClick={resetPluginForm}>
+                  Сброс
+                </button>
               </div>
             </div>
           </div>
         )}
 
         {settingsTab === "admin" && status === "authenticated" && user?.role === "admin" && (
-          <div className="panel">
+          <div className="panel section-anchor" id="admin-settings">
             <div className="panel-title">
               <h2>Глобальные настройки</h2>
               <p className="form-helper">Управление поведением всего IT Manager (admin-only).</p>
@@ -1709,47 +1798,57 @@ function SettingsPage() {
             </div>
             {adminSettingsLoading && <p>Загружаем...</p>}
             {adminSettingsError && <p className="text-error">{adminSettingsError}</p>}
-            <div className="form-stack" style={{ marginTop: 0 }}>
-              <label className="checkbox-row">
-                <input
-                  type="checkbox"
-                  checked={maintenanceMode}
-                  onChange={(e) => setMaintenanceMode(e.target.checked)}
-                />
-                <span>Maintenance mode (информирует операторов)</span>
-              </label>
-              <label>
-                Баннер (текст)
-                <input value={bannerMessage} onChange={(e) => setBannerMessage(e.target.value)} placeholder="Плановые работы 22:00–23:00" />
-              </label>
-              <label>
-                Уровень баннера
-                <select value={bannerLevel} onChange={(e) => setBannerLevel(e.target.value as GlobalSettings["banner_level"])}>
-                  <option value="info">info</option>
-                  <option value="warning">warning</option>
-                  <option value="error">error</option>
-                </select>
-              </label>
-              <label>
-                Default project ID
-                <input
-                  type="number"
-                  min={1}
-                  value={defaultProjectId}
-                  onChange={(e) => setDefaultProjectId(e.target.value)}
-                  placeholder="1"
-                />
-                <span className="form-helper">Используется как значение по умолчанию в UI (если задано).</span>
-              </label>
-              <div className="form-actions">
-                <button type="button" className="primary-button" onClick={saveAdminSettings}>
-                  Сохранить
-                </button>
+            <div className="form-grid">
+              <div className="form-section">
+                <h3>Maintenance & баннер</h3>
+                <div className="form-stack">
+                  <label className="checkbox-row">
+                    <input
+                      type="checkbox"
+                      checked={maintenanceMode}
+                      onChange={(e) => setMaintenanceMode(e.target.checked)}
+                    />
+                    <span>Maintenance mode (информирует операторов)</span>
+                  </label>
+                  <label>
+                    Баннер (текст)
+                    <input value={bannerMessage} onChange={(e) => setBannerMessage(e.target.value)} placeholder="Плановые работы 22:00–23:00" />
+                  </label>
+                  <label>
+                    Уровень баннера
+                    <select value={bannerLevel} onChange={(e) => setBannerLevel(e.target.value as GlobalSettings["banner_level"])}>
+                      <option value="info">info</option>
+                      <option value="warning">warning</option>
+                      <option value="error">error</option>
+                    </select>
+                  </label>
+                </div>
               </div>
-              {adminSettings && (
-                <p className="form-helper">Текущие: maintenance={String(adminSettings.maintenance_mode)}</p>
-              )}
+              <div className="form-section">
+                <h3>Значения по умолчанию</h3>
+                <div className="form-stack">
+                  <label>
+                    Default project ID
+                    <input
+                      type="number"
+                      min={1}
+                      value={defaultProjectId}
+                      onChange={(e) => setDefaultProjectId(e.target.value)}
+                      placeholder="1"
+                    />
+                    <span className="form-helper">Используется как значение по умолчанию в UI (если задано).</span>
+                  </label>
+                </div>
+              </div>
             </div>
+            <div className="form-actions">
+              <button type="button" className="primary-button" onClick={saveAdminSettings}>
+                Сохранить
+              </button>
+            </div>
+            {adminSettings && (
+              <p className="form-helper">Текущие: maintenance={String(adminSettings.maintenance_mode)}</p>
+            )}
           </div>
         )}
       </div>

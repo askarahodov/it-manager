@@ -73,6 +73,7 @@ class WorkerContext:
     run_timeout_seconds: int
     run_max_retries: int
     run_stale_seconds: int
+    pending_requeue_seconds: int
     keep_sensitive_artifacts: bool
     use_ansible_runner: bool
 
@@ -89,6 +90,7 @@ def _ctx_from_env() -> WorkerContext:
         run_timeout_seconds=int(os.environ.get("WORKER_RUN_TIMEOUT_SECONDS", "1800")),
         run_max_retries=int(os.environ.get("WORKER_RUN_MAX_RETRIES", "3")),
         run_stale_seconds=int(os.environ.get("WORKER_RUN_STALE_SECONDS", "3600")),
+        pending_requeue_seconds=int(os.environ.get("WORKER_PENDING_REQUEUE_SECONDS", "120")),
         keep_sensitive_artifacts=os.environ.get("WORKER_KEEP_SENSITIVE_ARTIFACTS", "").lower() in {"1", "true", "yes"},
         use_ansible_runner=os.environ.get("WORKER_USE_ANSIBLE_RUNNER", "1").lower() in {"1", "true", "yes"},
     )
@@ -478,6 +480,7 @@ async def stale_runs_watchdog_loop(ctx: WorkerContext) -> None:
     """
     logger.info("Stale runs watchdog started stale_after=%ss", ctx.run_stale_seconds)
     await asyncio.sleep(10)
+    r = redis.from_url(ctx.redis_url, decode_responses=True)
     async with httpx.AsyncClient(base_url=ctx.backend_url, timeout=30) as client:
         while True:
             token = _admin_token(ctx.secret_key)
@@ -496,17 +499,47 @@ async def stale_runs_watchdog_loop(ctx: WorkerContext) -> None:
                     if resp.status_code != 200:
                         continue
                     for run in resp.json():
-                        if run.get("status") != "running":
+                        status = run.get("status")
+                        if status not in {"running", "pending"}:
                             continue
+                        created_at = run.get("created_at")
                         started_at = run.get("started_at")
-                        if not started_at:
-                            continue
                         try:
-                            started = datetime.fromisoformat(started_at)
+                            created = datetime.fromisoformat(created_at) if created_at else None
                         except Exception:
-                            continue
-                        if started.tzinfo is None:
+                            created = None
+                        if created and created.tzinfo is None:
+                            created = created.replace(tzinfo=timezone.utc)
+                        try:
+                            started = datetime.fromisoformat(started_at) if started_at else None
+                        except Exception:
+                            started = None
+                        if started and started.tzinfo is None:
                             started = started.replace(tzinfo=timezone.utc)
+
+                        if status == "pending":
+                            if not created:
+                                continue
+                            age = (now - created).total_seconds()
+                            if age < ctx.pending_requeue_seconds:
+                                continue
+                            snapshot = run.get("target_snapshot") or {}
+                            approval_status = snapshot.get("approval_status")
+                            if approval_status == "pending" or snapshot.get("approval_id"):
+                                continue
+                            run_id = int(run["id"])
+                            lock_key = f"itmgr:runs:requeue:{pid}:{run_id}"
+                            got = await r.set(lock_key, "1", nx=True, ex=300)
+                            if not got:
+                                continue
+                            await r.lpush(QUEUE_RUNS, f"{pid}:{run_id}")
+                            logger.warning("Requeued pending run run_id=%s project_id=%s age=%ss", run_id, pid, int(age))
+                            continue
+
+                        if status != "running":
+                            continue
+                        if not started:
+                            continue
                         age = (now - started).total_seconds()
                         if age < ctx.run_stale_seconds:
                             continue

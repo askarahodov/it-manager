@@ -5,6 +5,8 @@ import logging
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import secrets
+
 from app.core.hash import get_password_hash
 from app.db.models import Project, User, UserRole
 
@@ -54,3 +56,18 @@ async def ensure_default_project(db: AsyncSession, *, name: str = "default") -> 
         except Exception:
             pass
         logger.debug("ensure_default_project skipped: %s", exc)
+
+
+async def ensure_worker_user(db: AsyncSession, *, email: str = "worker@it.local") -> None:
+    """Создаёт технического пользователя для воркера (best-effort)."""
+    email = (email or "").strip().lower()
+    if not email:
+        return
+    existing = await db.execute(select(User).where(User.email == email).limit(1))
+    if existing.scalar_one_or_none() is not None:
+        return
+    password = secrets.token_urlsafe(24)
+    user = User(email=email, password_hash=get_password_hash(password), role=UserRole.admin)
+    db.add(user)
+    await db.commit()
+    logger.info("Создан worker user email=%s", email)

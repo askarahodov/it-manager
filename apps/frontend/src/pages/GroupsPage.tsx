@@ -67,6 +67,10 @@ function GroupsPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hostFilter, setHostFilter] = useState<string>("");
+  const [groupSearch, setGroupSearch] = useState("");
+  const [groupPage, setGroupPage] = useState(1);
+  const [groupPageSize, setGroupPageSize] = useState(25);
+  const [selectedGroupIds, setSelectedGroupIds] = useState<Set<number>>(new Set());
 
   const canManageGroups = user?.role === "admin" || user?.role === "operator";
 
@@ -85,6 +89,39 @@ function GroupsPage() {
       "Формат rules: { op: 'and'|'or', rules: [ {field, op, value}, ... ] }. Поля: name, hostname, environment, os_type, username, port, tags.<key>. Операторы: eq, neq, contains, in.",
     []
   );
+
+  const totalPages = (items: number, pageSize: number) => Math.max(1, Math.ceil(items / pageSize));
+
+  const filteredGroups = useMemo(() => {
+    const query = groupSearch.trim().toLowerCase();
+    if (!query) return groups;
+    return groups.filter((group) => {
+      const desc = group.description ?? "";
+      return (
+        group.name.toLowerCase().includes(query) ||
+        group.type.toLowerCase().includes(query) ||
+        desc.toLowerCase().includes(query)
+      );
+    });
+  }, [groups, groupSearch]);
+
+  const groupTotalPages = useMemo(() => totalPages(filteredGroups.length, groupPageSize), [filteredGroups.length, groupPageSize]);
+
+  useEffect(() => {
+    setGroupPage(1);
+    setSelectedGroupIds(new Set());
+  }, [groupSearch, groupPageSize, groups.length]);
+
+  useEffect(() => {
+    if (groupPage > groupTotalPages) {
+      setGroupPage(groupTotalPages);
+    }
+  }, [groupPage, groupTotalPages]);
+
+  const groupPageItems = useMemo(() => {
+    const start = (groupPage - 1) * groupPageSize;
+    return filteredGroups.slice(start, start + groupPageSize);
+  }, [filteredGroups, groupPage, groupPageSize]);
 
   const loadAll = useCallback(async () => {
     if (!token) return;
@@ -245,6 +282,67 @@ function GroupsPage() {
     }
   };
 
+  const toggleGroupSelection = (groupId: number) => {
+    setSelectedGroupIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(groupId)) {
+        next.delete(groupId);
+      } else {
+        next.add(groupId);
+      }
+      return next;
+    });
+  };
+
+  const toggleAllGroupsOnPage = (checked: boolean) => {
+    setSelectedGroupIds((prev) => {
+      const next = new Set(prev);
+      groupPageItems.forEach((group) => {
+        if (checked) {
+          next.add(group.id);
+        } else {
+          next.delete(group.id);
+        }
+      });
+      return next;
+    });
+  };
+
+  const bulkDeleteGroups = async () => {
+    if (!token || !canManageGroups) return;
+    const selectedGroups = groups.filter((group) => selectedGroupIds.has(group.id));
+    if (selectedGroups.length === 0) {
+      pushToast({ title: "Нет выбранных групп", description: "Выберите хотя бы одну группу.", variant: "warning" });
+      return;
+    }
+    const ok = await confirm({
+      title: "Удалить группы?",
+      description: `Будут удалены ${selectedGroups.length} групп.`,
+      confirmText: "Удалить",
+      cancelText: "Отмена",
+      danger: true,
+    });
+    if (!ok) return;
+    let failed = 0;
+    for (const group of selectedGroups) {
+      try {
+        await apiFetch<void>(`/api/v1/groups/${group.id}`, { method: "DELETE", token });
+      } catch {
+        failed += 1;
+      }
+    }
+    if (selected && selectedGroupIds.has(selected.id)) {
+      startCreate();
+    }
+    setSelectedGroupIds(new Set());
+    loadAll().catch(() => undefined);
+    if (failed > 0) {
+      pushToast({ title: "Часть групп не удалена", description: `Ошибок: ${failed}`, variant: "warning" });
+      return;
+    }
+    pushToast({ title: "Группы удалены", description: `Удалено: ${selectedGroups.length}`, variant: "success" });
+  };
+
   const handleRecompute = async () => {
     if (!token || !selected) return;
     if (!canManageGroups) {
@@ -293,18 +391,66 @@ function GroupsPage() {
           <button type="button" className="ghost-button" onClick={loadAll}>
             Обновить
           </button>
-          <a className="help-link" href="/docs/user-guide.html#groups" target="_blank" rel="noreferrer">
-            Документация
+          <a
+            className="help-link"
+            href="/docs/user-guide.html#groups"
+            target="_blank"
+            rel="noreferrer"
+            aria-label="Справка по Groups"
+            title="Справка по Groups"
+          >
+            ?
           </a>
         </div>
       </header>
+      <div className="section-nav">
+        <a href="#groups-list">Список</a>
+        <a href="#groups-form">Форма</a>
+      </div>
 
       {error && <p className="text-error">{error}</p>}
       <div className="grid">
-        <div className="panel">
+        <div className="panel section-anchor" id="groups-list">
           <div className="panel-title">
             <h2>Список групп</h2>
-            <p className="form-helper">Нажмите на группу, чтобы открыть детали.</p>
+            <p className="form-helper">Выберите группы для массовых действий или откройте редактирование через кнопку.</p>
+          </div>
+          <div className="table-toolbar">
+            <div className="toolbar">
+              <input
+                value={groupSearch}
+                onChange={(e) => setGroupSearch(e.target.value)}
+                placeholder="Поиск: имя/описание/тип"
+                aria-label="Поиск по группам"
+              />
+              <select value={groupPageSize} onChange={(e) => setGroupPageSize(Number(e.target.value))}>
+                <option value={10}>10 / стр</option>
+                <option value={25}>25 / стр</option>
+                <option value={50}>50 / стр</option>
+                <option value={100}>100 / стр</option>
+              </select>
+              <span className="form-helper">Найдено: {filteredGroups.length}</span>
+            </div>
+            <div className="toolbar">
+              <button type="button" className="ghost-button" onClick={bulkDeleteGroups} disabled={!canManageGroups}>
+                Удалить выбранные
+              </button>
+              <span className="form-helper">Выбрано: {selectedGroupIds.size}</span>
+              <button type="button" className="ghost-button" onClick={() => setGroupPage((p) => Math.max(1, p - 1))} disabled={groupPage <= 1}>
+                Назад
+              </button>
+              <span className="form-helper">
+                Стр. {groupPage} / {groupTotalPages}
+              </span>
+              <button
+                type="button"
+                className="ghost-button"
+                onClick={() => setGroupPage((p) => Math.min(groupTotalPages, p + 1))}
+                disabled={groupPage >= groupTotalPages}
+              >
+                Далее
+              </button>
+            </div>
           </div>
           {loading && <p>Загружаем...</p>}
           {!loading && groups.length === 0 && (
@@ -314,27 +460,61 @@ function GroupsPage() {
               actionLabel="Создать группу"
               onAction={() => {
                 setSelected(null);
-                setForm(defaultGroupForm);
+                setForm(defaultForm);
                 setHostFilter("");
               }}
             />
           )}
-          {groups.length > 0 && (
+          {!loading && groups.length > 0 && filteredGroups.length === 0 && (
+            <p className="form-helper">По текущему фильтру групп не найдено.</p>
+          )}
+          {groupPageItems.length > 0 && (
             <div className="table-scroll">
               <table className="hosts-table">
                 <thead>
                   <tr>
+                    <th style={{ width: 40 }}>
+                      <input
+                        type="checkbox"
+                        aria-label="Выбрать все группы на странице"
+                        checked={groupPageItems.length > 0 && groupPageItems.every((group) => selectedGroupIds.has(group.id))}
+                        onChange={(e) => toggleAllGroupsOnPage(e.target.checked)}
+                      />
+                    </th>
                     <th>Название</th>
                     <th>Тип</th>
                     <th>Описание</th>
+                    <th>Действия</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {groups.map((group) => (
-                    <tr key={group.id} onClick={() => startEdit(group)}>
+                  {groupPageItems.map((group) => (
+                    <tr key={group.id} onClick={() => toggleGroupSelection(group.id)}>
+                      <td onClick={(event) => event.stopPropagation()}>
+                        <input
+                          type="checkbox"
+                          aria-label={`Выбрать группу ${group.name}`}
+                          checked={selectedGroupIds.has(group.id)}
+                          onChange={() => toggleGroupSelection(group.id)}
+                        />
+                      </td>
                       <td>{group.name}</td>
                       <td>{group.type}</td>
                       <td>{group.description ?? ""}</td>
+                      <td>
+                        <div className="row-actions compact">
+                          <button
+                            type="button"
+                            className="ghost-button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              startEdit(group);
+                            }}
+                          >
+                            Редактировать
+                          </button>
+                        </div>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -343,7 +523,7 @@ function GroupsPage() {
           )}
         </div>
 
-        <div className="panel">
+        <div className="panel section-anchor" id="groups-form">
           <div className="panel-title">
             <h2>{selected ? `Группа: ${selected.name}` : "Создать группу"}</h2>
             <p className="form-helper">

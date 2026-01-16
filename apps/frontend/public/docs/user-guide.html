@@ -56,6 +56,9 @@
         margin-top: 0;
         font-size: 1.2rem;
       }
+      h3 {
+        margin-bottom: 0.25rem;
+      }
       code, pre {
         background: rgba(15, 23, 42, 0.9);
         border: 1px solid rgba(148, 163, 184, 0.2);
@@ -66,7 +69,7 @@
         padding: 0.75rem;
         overflow: auto;
       }
-      ul {
+      ul, ol {
         margin: 0.5rem 0 0;
         padding-left: 1.25rem;
       }
@@ -79,7 +82,7 @@
   <body>
     <header>
       <h1>IT Manager — пользовательская документация</h1>
-      <p class="note">Краткое руководство по каждому разделу интерфейса.</p>
+      <p class="note">Подробное руководство по каждому разделу интерфейса.</p>
       <nav>
         <a href="#intro">Введение</a>
         <a href="#projects">Проекты</a>
@@ -93,34 +96,37 @@
         <a href="#notifications">Notifications</a>
         <a href="#plugins">Plugins</a>
         <a href="#audit">Audit Log</a>
+        <a href="#troubleshooting">Troubleshooting</a>
+        <a href="#examples">Примеры</a>
         <a href="#doxygen">Doxygen</a>
       </nav>
     </header>
 
     <section id="intro">
       <h2>Введение</h2>
-      <p>IT Manager — веб‑панель для инвентаризации хостов, управления доступом и автоматизации (Ansible).</p>
-      <h3>Роли</h3>
+      <p>IT Manager — веб‑панель для инвентаризации, доступа и автоматизации IT‑инфраструктуры.</p>
+      <h3>Роли и доступы</h3>
       <ul>
-        <li>admin — полный доступ, включая reveal секретов и настройки.</li>
+        <li>admin — полный доступ, включая reveal секретов и admin settings.</li>
         <li>operator — управление хостами/группами, запуск автоматизации.</li>
         <li>viewer — только просмотр.</li>
         <li>automation-only — только автоматизация.</li>
       </ul>
       <h3>Вход</h3>
       <ol>
-        <li>Откройте раздел Settings.</li>
+        <li>Откройте Settings.</li>
         <li>Введите email/пароль.</li>
-        <li>Убедитесь, что в topbar выбран корректный проект.</li>
+        <li>Выберите проект в topbar.</li>
       </ol>
     </section>
 
     <section id="projects">
       <h2>Проекты (Projects / Tenants)</h2>
-      <p>Проект изолирует хосты/группы/секреты/плейбуки/запуски.</p>
+      <p>Проект изолирует hosts, groups, secrets, playbooks и runs. Все запросы UI отправляются с X-Project-Id.</p>
       <ul>
         <li>Переключатель проекта находится в topbar.</li>
-        <li>После смены проекта все списки перезагружаются.</li>
+        <li>После смены проекта данные перезагружаются.</li>
+        <li>Если доступ к проекту ограничен — обратитесь к admin.</li>
       </ul>
     </section>
 
@@ -139,28 +145,38 @@
       <h2>Hosts (Инвентаризация)</h2>
       <h3>Список</h3>
       <ul>
-        <li>Поиск по имени/hostname.</li>
-        <li>Фильтры по status, environment, os и тегам.</li>
+        <li>Поиск по name/hostname.</li>
+        <li>Фильтры: status, environment, os, tags.</li>
         <li>Клик по строке открывает редактирование.</li>
+        <li>Пагинация по странице и выбор размера.</li>
+        <li>Batch: удалить выбранные хосты (admin/operator).</li>
       </ul>
-      <h3>Действия</h3>
+      <h3>Поля формы</h3>
       <ul>
-        <li>Проверить — status‑check.</li>
-        <li>Детали — карточка хоста.</li>
-        <li>Терминал — SSH терминал в браузере.</li>
+        <li>name — имя хоста.</li>
+        <li>hostname — DNS имя или IP.</li>
+        <li>port — порт SSH (по умолчанию 22).</li>
+        <li>username — логин для SSH.</li>
+        <li>os_type — linux/windows и т.п.</li>
+        <li>environment — prod/stage/dev.</li>
+        <li>tags — JSON ключ‑значение.</li>
+        <li>credential — ссылка на секрет.</li>
+        <li>check_method — tcp/ping/ssh.</li>
+        <li>record_ssh — запись SSH сессий.</li>
       </ul>
-      <h3>Пример тегов</h3>
+      <h3>Пример tags</h3>
       <pre>{"role":"db","env":"prod"}</pre>
     </section>
 
     <section id="groups">
       <h2>Groups</h2>
       <p>Группы бывают статические и динамические.</p>
-      <h3>Static</h3>
-      <p>Выбор конкретных хостов.</p>
-      <h3>Dynamic</h3>
-      <p>Правило в JSON (rule), по среде/тегам.</p>
-      <h3>Пример правила</h3>
+      <ul>
+        <li>Поиск по имени/описанию/типу.</li>
+        <li>Пагинация и выбор размера страницы.</li>
+        <li>Batch: удаление выбранных групп (admin/operator).</li>
+      </ul>
+      <h3>Dynamic rule пример</h3>
       <pre>{"environments":["prod"],"tags":{"role":"db"}}</pre>
     </section>
 
@@ -170,59 +186,93 @@
         <li>Типы: text, password, token, private_key.</li>
         <li>Reveal доступен только admin.</li>
         <li>Rotation: ручная и по интервалу.</li>
+        <li>Поиск и фильтры по типу/scope.</li>
+        <li>Пагинация и выбор размера страницы.</li>
+        <li>Batch: удаление выбранных секретов (admin).</li>
       </ul>
-      <h3>Dynamic secrets (leases)</h3>
-      <ul>
-        <li>Настройка TTL.</li>
-        <li>Кнопка Lease выдаёт временное значение.</li>
-      </ul>
+      <h3>Dynamic secrets</h3>
+      <p>Включите dynamic_enabled и задайте TTL, затем используйте кнопку Lease.</p>
     </section>
 
     <section id="automation">
       <h2>Automation</h2>
-      <h3>Playbooks</h3>
+      <h3 id="automation-playbooks">Playbooks</h3>
       <ul>
-        <li>Хранение YAML в stored_content.</li>
+        <li>stored_content — YAML плейбук.</li>
         <li>Git‑репозиторий (URL/ref/path) + Sync.</li>
       </ul>
-      <h3>Templates / Instances</h3>
+      <h3 id="automation-templates">Templates / Instances</h3>
       <ul>
-        <li>Template содержит schema и defaults.</li>
-        <li>Instance хранит values + цели (hosts/groups).</li>
+        <li>Template: vars_schema и vars_defaults.</li>
+        <li>Instance: values + targets.</li>
       </ul>
-      <h3>Triggers</h3>
+      <h3>Пример vars_schema</h3>
+      <pre>{
+  "app_version": {"type": "string"},
+  "environment": {"type": "enum", "enum": ["prod", "stage", "dev"]},
+  "db_password": {"type": "secret", "use_only": true}
+}</pre>
+      <h3>Пример vars_defaults</h3>
+      <pre>{"environment":"stage"}</pre>
+      <h3 id="automation-triggers">Triggers</h3>
       <p>Автозапуск по событиям: host_created, host_tags_changed, secret_rotated.</p>
-      <h3>Runs / Approvals</h3>
-      <p>История запусков, live‑лог, approvals для prod.</p>
+      <p>Фильтры: поиск по id/типу/плейбуку и фильтр по типу события.</p>
+      <p>Пагинация и размер страницы, пакетные действия enable/disable/delete (admin).</p>
+      <h3 id="automation-runs">Runs / Approvals</h3>
+      <p>История запусков, live‑лог и approvals для prod.</p>
+      <p>Фильтры: статус + поиск по id/плейбуку/commit/actor. Approvals: опция “только pending”.</p>
+      <p>Пагинация (page size + навигация). Batch approvals: approve/reject выбранных (admin).</p>
       <h3>Пример extra_vars</h3>
       <pre>{"app_version":"1.2.3","feature_flag":true}</pre>
+      <h3>Пример cron</h3>
+      <pre>0 */6 * * *</pre>
     </section>
 
     <section id="ssh">
       <h2>SSH Terminal</h2>
       <ul>
         <li>Доступен на карточке хоста.</li>
-        <li>Поддержка password и private key.</li>
-        <li>При включённой записи — сохраняется transcript.</li>
+        <li>Поддержка password/private_key.</li>
+        <li>При включенной записи — сохраняется transcript.</li>
       </ul>
     </section>
 
     <section id="settings">
       <h2>Settings</h2>
-      <ul>
-        <li>Сессия и режим таблиц.</li>
-        <li>Пользователи и доступы (admin).</li>
-        <li>Проекты и переключение.</li>
-        <li>Audit log (admin).</li>
-        <li>Notifications (admin).</li>
-        <li>Plugins (admin).</li>
-        <li>Admin settings (maintenance/banner/default project).</li>
-      </ul>
+      <p>Доступ к сессии, проектам, пользователям, audit log, уведомлениям и admin settings.</p>
+      <h3 id="settings-session">Сессия</h3>
+      <p>Вход/выход и режим таблиц.</p>
+      <h3 id="settings-projects">Проекты</h3>
+      <p>Список проектов и создание.</p>
+      <h3 id="settings-users">Пользователи</h3>
+      <p>Создание пользователей, роли и ограничения (admin).</p>
+      <h3 id="settings-audit">Audit log</h3>
+      <p>Просмотр событий и экспорт (admin).</p>
+      <h3 id="settings-notifications">Notifications</h3>
+      <p>Webhooks/каналы и события (admin).</p>
+      <h3 id="settings-plugins">Plugins</h3>
+      <p>Plugin instances, default и enable/disable (admin).</p>
+      <h3 id="settings-admin">Admin settings</h3>
+      <p>Maintenance/banner/default project (admin).</p>
     </section>
 
     <section id="notifications">
       <h2>Notifications</h2>
       <p>Webhooks и каналы: webhook/slack/telegram/email. Можно выбрать события (run.failed, approval.requested, secret.expiring и др.).</p>
+      <h3>Пример payload события</h3>
+      <pre>{
+  "event": "run.failed",
+  "project_id": 1,
+  "payload": {
+    "run_id": 42,
+    "playbook_id": 5,
+    "status": "failed",
+    "triggered_by": "manual",
+    "started_at": "2025-01-01T10:00:00Z"
+  }
+}</pre>
+      <h3>Webhook secret header</h3>
+      <pre>X-Webhook-Secret: &lt;secret&gt;</pre>
     </section>
 
     <section id="plugins">
@@ -233,6 +283,48 @@
     <section id="audit">
       <h2>Audit Log</h2>
       <p>Admin‑раздел для просмотра событий CRUD/SSH/Automation с фильтрами и экспортом.</p>
+    </section>
+
+    <section id="troubleshooting">
+      <h2>Troubleshooting</h2>
+      <h3>Не вижу данные проекта</h3>
+      <ul>
+        <li>Проверьте выбранный проект в topbar.</li>
+        <li>Убедитесь, что у пользователя есть доступ к проекту.</li>
+      </ul>
+      <h3>Терминал не подключается</h3>
+      <ul>
+        <li>Убедитесь, что credential задан (password/private_key).</li>
+        <li>Проверьте hostname и port.</li>
+        <li>Если статус offline — выполните Проверить.</li>
+      </ul>
+      <h3>Status-check не работает</h3>
+      <ul>
+        <li>ping требует iputils-ping в backend контейнере.</li>
+        <li>ssh требует credential.</li>
+      </ul>
+      <h3>Sync playbook из Git не выполняется</h3>
+      <ul>
+        <li>Проверьте repo_url, repo_ref, repo_playbook_path.</li>
+        <li>Убедитесь в доступе воркера к репозиторию.</li>
+      </ul>
+      <h3>Approval не появляется</h3>
+      <ul>
+        <li>Для approval нужны цели с environment=prod.</li>
+        <li>Проверьте вкладку Runs/Approvals.</li>
+      </ul>
+    </section>
+
+    <section id="examples">
+      <h2>Примеры конфигураций</h2>
+      <h3>SSH credential (password)</h3>
+      <pre>{"secret_type":"password","value":"SuperSecret123"}</pre>
+      <h3>SSH credential (private_key)</h3>
+      <pre>{"secret_type":"private_key","value":"-----BEGIN OPENSSH PRIVATE KEY-----\n...","passphrase":"optional"}</pre>
+      <h3>Пример playbook trigger (filters)</h3>
+      <pre>{"environments":["prod"],"tags":{"role":"web"}}</pre>
+      <h3>Пример inventory tag filter</h3>
+      <pre>{"tags":{"env":"prod","role":"db"}}</pre>
     </section>
 
     <section id="doxygen">

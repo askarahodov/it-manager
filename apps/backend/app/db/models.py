@@ -394,4 +394,3 @@ class GlobalSetting(Base):
     key = Column(String, primary_key=True)
     value = Column(JSONB, nullable=False, default=dict)
     updated_at = Column(DateTime, onupdate=datetime.utcnow)
-    updated_at = Column(DateTime, onupdate=datetime.utcnow())

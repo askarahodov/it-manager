@@ -89,9 +89,15 @@
 
 - [x] Approvals: список запросов + approve/reject + комментарий.
 - [x] Approvals: просмотр diff параметров (before/after) в отдельном UI.
+- [x] Approvals: фильтр (pending) и подсчёт.
+- [x] Approvals: batch approve/reject выбранных.
 - [x] Triggers: CRUD интерфейс (host_created/host_tags_changed/secret_rotated).
+- [x] Triggers: фильтр по типу + поиск.
+- [x] Triggers: batch enable/disable/delete выбранных.
 - [x] Webhook: генерация/просмотр токена плейбука + подсказки.
 - [x] Tables: scroll + sticky header для playbooks/templates/triggers/runs.
+- [x] Runs: фильтры по статусу и поиску (id/плейбук/commit/actor).
+- [x] Runs/Approvals/Triggers: пагинация + выбор page size.
 
 ## Automation: Git integration (UI)
 
@@ -105,6 +111,7 @@
 - [x] Политика ротации: interval (дни) + next rotation.
 - [x] Ручная ротация с вводом нового значения.
 - [x] Опция “применить ротацию на хостах” для password-секретов.
+- [x] Secrets: пагинация + page size + batch delete.
 
 ## Secrets: Dynamic (UI)
 
@@ -138,7 +145,8 @@
 - [x] UI для remote actions на карточке хоста (reboot/restart/fetch logs/upload file).
 
 ## Что дальше
-
+- [x] Hosts: batch delete + индикатор выбранных.
+- [x] Groups: поиск + пагинация + batch delete.
 - [x] Привести локализацию Hosts/filters к единому русскому словарю.
 - [x] Добавить `aria-sort` и улучшить affordance сортировки в заголовках таблиц.
 - [x] Сделать “sticky actions”/якоря для длинных форм Automation.
@@ -146,3 +154,6 @@
 - [x] Empty states: CTA для Hosts/Secrets/Automation playbooks.
 - [x] Empty states: CTA для Groups/Automation templates/instances/triggers.
 - [x] Help links: ссылки на пользовательскую документацию в ключевых разделах.
+- [x] Help links: ссылка на раздел SSH Terminal в модальном окне терминала.
+- [x] Help links: Automation табы ведут на под‑разделы документации.
+- [x] Help links: значок ? вместо текста, добавлены ссылки на формы/панели.

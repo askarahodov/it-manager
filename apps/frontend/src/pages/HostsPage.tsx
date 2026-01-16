@@ -3,6 +3,7 @@ import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useState } fro
 import { apiFetch } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import TerminalPane from "../components/TerminalPane";
+import ActionMenu from "../components/ui/ActionMenu";
 import { useConfirm } from "../components/ui/ConfirmProvider";
 import EmptyState from "../components/ui/EmptyState";
 import { useToast } from "../components/ui/ToastProvider";
@@ -97,6 +98,7 @@ function HostsPage() {
   const [showTerminal, setShowTerminal] = useState(false);
   const [terminalFull, setTerminalFull] = useState(false);
   const [hostsTab, setHostsTab] = useState<"list" | "form">("list");
+  const [selectedHostIds, setSelectedHostIds] = useState<Set<number>>(new Set());
 
   const canManageHosts = user?.role === "admin" || user?.role === "operator";
   const canCheckHosts = canManageHosts;
@@ -135,6 +137,10 @@ function HostsPage() {
       setLoading(false);
     }
   }, [token, search, statusFilter, envFilter, osFilter, tagKey, tagValue, sortBy, sortDir, limit, offset, pushToast]);
+
+  useEffect(() => {
+    setSelectedHostIds(new Set());
+  }, [search, statusFilter, envFilter, osFilter, tagKey, tagValue, sortBy, sortDir, limit, offset]);
 
   useEffect(() => {
     setOffset(0);
@@ -188,7 +194,7 @@ function HostsPage() {
     }
   };
 
-  const handleSelect = (host: Host) => {
+  const openEditor = (host: Host) => {
     setActiveHost(host);
     setFormMode("edit");
     setFormState({
@@ -331,6 +337,64 @@ function HostsPage() {
     }
   };
 
+  const toggleHostSelection = (hostId: number) => {
+    setSelectedHostIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(hostId)) {
+        next.delete(hostId);
+      } else {
+        next.add(hostId);
+      }
+      return next;
+    });
+  };
+
+  const toggleAllHostsOnPage = (checked: boolean) => {
+    setSelectedHostIds((prev) => {
+      const next = new Set(prev);
+      hosts.forEach((host) => {
+        if (checked) {
+          next.add(host.id);
+        } else {
+          next.delete(host.id);
+        }
+      });
+      return next;
+    });
+  };
+
+  const bulkDeleteHosts = async () => {
+    if (!token || !canManageHosts) return;
+    const selected = hosts.filter((host) => selectedHostIds.has(host.id));
+    if (selected.length === 0) {
+      pushToast({ title: "Нет выбранных хостов", description: "Выберите хотя бы один хост.", variant: "warning" });
+      return;
+    }
+    const ok = await confirm({
+      title: "Удалить хосты?",
+      description: `Будут удалены ${selected.length} хостов.`,
+      confirmText: "Удалить",
+      cancelText: "Отмена",
+      danger: true,
+    });
+    if (!ok) return;
+    let failed = 0;
+    for (const host of selected) {
+      try {
+        await apiFetch<void>(`/api/v1/hosts/${host.id}`, { method: "DELETE", token });
+      } catch {
+        failed += 1;
+      }
+    }
+    setSelectedHostIds(new Set());
+    loadHosts().catch(() => undefined);
+    if (failed > 0) {
+      pushToast({ title: "Часть хостов не удалена", description: `Ошибок: ${failed}`, variant: "warning" });
+      return;
+    }
+    pushToast({ title: "Хосты удалены", description: `Удалено: ${selected.length}`, variant: "success" });
+  };
+
   const openDetails = (host: Host) => {
     window.location.hash = `#/hosts/${host.id}`;
   };
@@ -361,8 +425,15 @@ function HostsPage() {
               </div>
             ))}
           </div>
-          <a className="help-link" href="/docs/user-guide.html#hosts" target="_blank" rel="noreferrer">
-            Документация
+          <a
+            className="help-link"
+            href="/docs/user-guide.html#hosts"
+            target="_blank"
+            rel="noreferrer"
+            aria-label="Справка по Hosts"
+            title="Справка по Hosts"
+          >
+            ?
           </a>
         </div>
       </header>
@@ -383,13 +454,17 @@ function HostsPage() {
           {formMode === "create" ? "Добавить" : "Редактировать"}
         </button>
       </div>
+      <div className="section-nav">
+        <a href="#hosts-list">Список</a>
+        <a href="#hosts-form">Форма</a>
+      </div>
 
       <div className="grid">
         {hostsTab === "list" && (
-        <div className="panel hosts-list">
+        <div className="panel hosts-list section-anchor" id="hosts-list">
           <div className="panel-title">
             <h2>Список хостов</h2>
-            <p>Нажмите на строку, чтобы отредактировать</p>
+            <p>Выберите строки для массовых действий или откройте редактирование через кнопку.</p>
           </div>
           <div className="row-actions" style={{ alignItems: "center", flexWrap: "wrap" }}>
             <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -439,11 +514,15 @@ function HostsPage() {
               Обновить
             </button>
           </div>
-          <div className="row-actions" style={{ marginTop: 8, justifyContent: "space-between" }}>
-            <div className="form-helper" style={{ marginTop: 0 }}>
-              Показано: {hosts.length} (offset {offset})
+          <div className="table-toolbar">
+            <div className="toolbar">
+              <span className="form-helper">Показано: {hosts.length} (offset {offset})</span>
+              <span className="form-helper">Выбрано: {selectedHostIds.size}</span>
             </div>
-            <div className="row-actions">
+            <div className="toolbar">
+              <button type="button" className="ghost-button" onClick={bulkDeleteHosts} disabled={!canManageHosts}>
+                Удалить выбранные
+              </button>
               <button type="button" className="ghost-button" disabled={offset === 0 || loading} onClick={() => setOffset((v) => Math.max(0, v - limit))}>
                 Назад
               </button>
@@ -475,6 +554,7 @@ function HostsPage() {
               <table className="hosts-table">
                 <thead>
                   <tr>
+                    <th style={{ width: 40 }} />
                     <th>Название</th>
                     <th>Hostname/IP</th>
                     <th>ОС</th>
@@ -505,6 +585,14 @@ function HostsPage() {
               <table className="hosts-table">
                 <thead>
                   <tr>
+                    <th style={{ width: 40 }}>
+                      <input
+                        type="checkbox"
+                        aria-label="Выбрать все хосты на странице"
+                        checked={hosts.length > 0 && hosts.every((host) => selectedHostIds.has(host.id))}
+                        onChange={(event) => toggleAllHostsOnPage(event.target.checked)}
+                      />
+                    </th>
                     <th aria-sort={sortBy === "name" ? (sortDir === "asc" ? "ascending" : "descending") : "none"} scope="col">
                       <button type="button" className="th-sort-button" onClick={() => toggleSort("name")} aria-label="Сортировать по названию">
                         <span>Название</span>
@@ -543,17 +631,25 @@ function HostsPage() {
                   {hosts.map((host) => (
                     <tr
                       key={host.id}
-                      onClick={() => handleSelect(host)}
+                      onClick={() => toggleHostSelection(host.id)}
                       onKeyDown={(event) => {
                         if (event.key === "Enter" || event.key === " ") {
                           event.preventDefault();
-                          handleSelect(host);
+                          toggleHostSelection(host.id);
                         }
                       }}
-                      className={activeHost?.id === host.id ? "active-row" : undefined}
+                      className={selectedHostIds.has(host.id) ? "active-row" : undefined}
                       tabIndex={0}
-                      aria-selected={activeHost?.id === host.id}
+                      aria-selected={selectedHostIds.has(host.id)}
                     >
+                      <td onClick={(event) => event.stopPropagation()}>
+                        <input
+                          type="checkbox"
+                          aria-label={`Выбрать хост ${host.name}`}
+                          checked={selectedHostIds.has(host.id)}
+                          onChange={() => toggleHostSelection(host.id)}
+                        />
+                      </td>
                       <td>{host.name}</td>
                       <td>{host.hostname}:{host.port}</td>
                       <td>{host.os_type}</td>
@@ -563,17 +659,7 @@ function HostsPage() {
                         <span className={`status-pill mini ${host.status}`}>{host.status}</span>
                       </td>
                       <td>
-                        <div className="row-actions">
-                          <button
-                            type="button"
-                            className="ghost-button"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              handleCheckStatus(host);
-                            }}
-                          >
-                            Проверить
-                          </button>
+                        <div className="row-actions compact">
                           <button
                             type="button"
                             className="ghost-button"
@@ -585,38 +671,41 @@ function HostsPage() {
                           >
                             Детали
                           </button>
-                        <button
-                          type="button"
-                          className="ghost-button"
-                          disabled={host.status === "offline" || !host.credential_id || !canSsh}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            setTerminalHost(host);
-                            setShowTerminal(true);
-                          }}
-                          title={
-                            host.status === "offline"
-                              ? "Хост offline"
-                              : !host.credential_id
-                                ? "Для SSH нужен credential (password/private_key)"
-                                : !canSsh
-                                  ? "Недостаточно прав для SSH (нужна роль admin/operator)"
-                                : "Открыть терминал"
-                          }
-                        >
-                          Терминал
-                        </button>
-                        <button
-                          type="button"
-                          className="ghost-button"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            handleDeleteHost(host);
-                          }}
-                          disabled={!canManageHosts}
-                        >
-                          Удалить
-                        </button>
+                          <ActionMenu
+                            ariaLabel={`Действия для ${host.name}`}
+                            items={[
+                              {
+                                label: "Редактировать",
+                                onClick: () => openEditor(host),
+                              },
+                              {
+                                label: "Проверить",
+                                onClick: () => handleCheckStatus(host),
+                              },
+                              {
+                                label: "Терминал",
+                                onClick: () => {
+                                  setTerminalHost(host);
+                                  setShowTerminal(true);
+                                },
+                                disabled: host.status === "offline" || !host.credential_id || !canSsh,
+                                title:
+                                  host.status === "offline"
+                                    ? "Хост offline"
+                                    : !host.credential_id
+                                      ? "Для SSH нужен credential (password/private_key)"
+                                      : !canSsh
+                                        ? "Недостаточно прав для SSH (нужна роль admin/operator)"
+                                        : "Открыть терминал",
+                              },
+                              {
+                                label: "Удалить",
+                                onClick: () => handleDeleteHost(host),
+                                disabled: !canManageHosts,
+                                danger: true,
+                              },
+                            ]}
+                          />
                         </div>
                       </td>
                     </tr>
@@ -628,66 +717,78 @@ function HostsPage() {
         </div>
         )}
         {hostsTab === "form" && (
-        <div className="panel hosts-form">
+        <div className="panel hosts-form section-anchor" id="hosts-form">
           <div className="panel-title">
             <h2>{formMode === "create" ? "Добавить хост" : "Редактировать хост"}</h2>
             <p>{statusBadge[activeHost?.status ?? "unknown"]}</p>
           </div>
           {!canManageHosts && <p className="form-helper">Режим read-only: создание/редактирование/удаление доступно только admin/operator.</p>}
           <form onSubmit={handleSubmit} className="form-stack">
-            <label>
-              Название
-              <input name="name" value={formState.name} onChange={handleChange} required disabled={!canManageHosts} />
-            </label>
-            <label>
-              Hostname/IP
-              <input name="hostname" value={formState.hostname} onChange={handleChange} required disabled={!canManageHosts} />
-            </label>
-            <label>
-              Порт
-              <input name="port" type="number" value={formState.port} onChange={handleChange} min={1} max={65535} disabled={!canManageHosts} />
-            </label>
-            <label>
-              Пользователь
-              <input name="username" value={formState.username} onChange={handleChange} disabled={!canManageHosts} />
-            </label>
-            <label>
-              OS
-              <input name="os_type" value={formState.os_type} onChange={handleChange} disabled={!canManageHosts} />
-            </label>
-            <label>
-              Среда
-              <select name="environment" value={formState.environment} onChange={handleChange} disabled={!canManageHosts}>
-                <option value="prod">prod</option>
-                <option value="stage">stage</option>
-                <option value="dev">dev</option>
-              </select>
-            </label>
-            <label>
-              Теги (key=value, ...)
-              <input name="tags" value={formState.tags} onChange={handleChange} disabled={!canManageHosts} />
-            </label>
-            <label>
-              Credential (из Secrets)
-              <select name="credential_id" value={formState.credential_id} onChange={handleChange} disabled={!canManageHosts}>
-                <option value="">—</option>
-                {sshSecretOptions.map((secret) => (
-                  <option key={secret.id} value={secret.id}>
-                    {secret.name} ({secret.type})
-                  </option>
-                ))}
-              </select>
-              <span className="form-helper">Показываются только secrets типов password/private_key (для SSH).</span>
-            </label>
-            <label>
-              Метод проверки статуса
-              <select name="check_method" value={formState.check_method ?? "tcp"} onChange={handleChange} disabled={!canManageHosts}>
-                <option value="tcp">tcp</option>
-                <option value="ping">ping</option>
-                <option value="ssh">ssh</option>
-              </select>
-              <span className="form-helper">ping требует `iputils-ping` в backend; ssh использует credential (password/private_key).</span>
-            </label>
+            <div className="form-grid">
+              <div className="form-section">
+                <h3>Основное</h3>
+                <div className="form-stack">
+                  <label>
+                    Название
+                    <input name="name" value={formState.name} onChange={handleChange} required disabled={!canManageHosts} />
+                  </label>
+                  <label>
+                    Hostname/IP
+                    <input name="hostname" value={formState.hostname} onChange={handleChange} required disabled={!canManageHosts} />
+                  </label>
+                  <label>
+                    Порт
+                    <input name="port" type="number" value={formState.port} onChange={handleChange} min={1} max={65535} disabled={!canManageHosts} />
+                  </label>
+                  <label>
+                    Пользователь
+                    <input name="username" value={formState.username} onChange={handleChange} disabled={!canManageHosts} />
+                  </label>
+                </div>
+              </div>
+              <div className="form-section">
+                <h3>Метаданные и доступ</h3>
+                <div className="form-stack">
+                  <label>
+                    OS
+                    <input name="os_type" value={formState.os_type} onChange={handleChange} disabled={!canManageHosts} />
+                  </label>
+                  <label>
+                    Среда
+                    <select name="environment" value={formState.environment} onChange={handleChange} disabled={!canManageHosts}>
+                      <option value="prod">prod</option>
+                      <option value="stage">stage</option>
+                      <option value="dev">dev</option>
+                    </select>
+                  </label>
+                  <label>
+                    Теги (key=value, ...)
+                    <input name="tags" value={formState.tags} onChange={handleChange} disabled={!canManageHosts} />
+                  </label>
+                  <label>
+                    Credential (из Secrets)
+                    <select name="credential_id" value={formState.credential_id} onChange={handleChange} disabled={!canManageHosts}>
+                      <option value="">—</option>
+                      {sshSecretOptions.map((secret) => (
+                        <option key={secret.id} value={secret.id}>
+                          {secret.name} ({secret.type})
+                        </option>
+                      ))}
+                    </select>
+                    <span className="form-helper">Показываются только secrets типов password/private_key (для SSH).</span>
+                  </label>
+                  <label>
+                    Метод проверки статуса
+                    <select name="check_method" value={formState.check_method ?? "tcp"} onChange={handleChange} disabled={!canManageHosts}>
+                      <option value="tcp">tcp</option>
+                      <option value="ping">ping</option>
+                      <option value="ssh">ssh</option>
+                    </select>
+                    <span className="form-helper">ping требует `iputils-ping` в backend; ssh использует credential (password/private_key).</span>
+                  </label>
+                </div>
+              </div>
+            </div>
             <div className="form-actions">
               <button className="primary-button" type="submit" disabled={!canManageHosts}>
                 Сохранить
@@ -734,6 +835,16 @@ function HostsPage() {
                   >
                     {terminalFull ? "Окно" : "На весь экран"}
                   </button>
+                  <a
+                    className="help-link"
+                    href="/docs/user-guide.html#ssh"
+                    target="_blank"
+                    rel="noreferrer"
+                    aria-label="Справка по SSH терминалу"
+                    title="Справка по SSH терминалу"
+                  >
+                    ?
+                  </a>
                   <button
                     className="ghost-button"
                     type="button"

@@ -3,6 +3,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { apiFetch } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { useConfirm } from "../components/ui/ConfirmProvider";
+import ActionMenu from "../components/ui/ActionMenu";
 import { useToast } from "../components/ui/ToastProvider";
 import EmptyState from "../components/ui/EmptyState";
 import { formatError } from "../lib/errors";
@@ -103,6 +104,12 @@ function SecretsPage() {
   const [leaseValue, setLeaseValue] = useState<string | null>(null);
   const [leaseExpiresAt, setLeaseExpiresAt] = useState<string | null>(null);
   const [leaseSecretName, setLeaseSecretName] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [typeFilter, setTypeFilter] = useState<SecretType | "all">("all");
+  const [scopeFilter, setScopeFilter] = useState<SecretScope | "all">("all");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
+  const [selectedSecretIds, setSelectedSecretIds] = useState<Set<number>>(new Set());
 
   const isAdmin = user?.role === "admin";
   const canReveal = isAdmin;
@@ -115,6 +122,50 @@ function SecretsPage() {
     });
     return summary;
   }, [secrets]);
+
+  const totalPages = (items: number, size: number) => Math.max(1, Math.ceil(items / size));
+
+  const filteredSecrets = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    return secrets.filter((secret) => {
+      if (typeFilter !== "all" && secret.type !== typeFilter) {
+        return false;
+      }
+      if (scopeFilter !== "all" && secret.scope !== scopeFilter) {
+        return false;
+      }
+      if (!query) return true;
+      const desc = secret.description ?? "";
+      const tags = Object.entries(secret.tags || {})
+        .map(([key, value]) => `${key}=${value}`)
+        .join(" ");
+      return (
+        secret.name.toLowerCase().includes(query) ||
+        desc.toLowerCase().includes(query) ||
+        secret.type.toLowerCase().includes(query) ||
+        secret.scope.toLowerCase().includes(query) ||
+        tags.toLowerCase().includes(query)
+      );
+    });
+  }, [secrets, searchQuery, typeFilter, scopeFilter]);
+
+  const pageTotal = useMemo(() => totalPages(filteredSecrets.length, pageSize), [filteredSecrets.length, pageSize]);
+
+  useEffect(() => {
+    setPage(1);
+    setSelectedSecretIds(new Set());
+  }, [searchQuery, typeFilter, scopeFilter, pageSize, secrets.length]);
+
+  useEffect(() => {
+    if (page > pageTotal) {
+      setPage(pageTotal);
+    }
+  }, [page, pageTotal]);
+
+  const pageItems = useMemo(() => {
+    const start = (page - 1) * pageSize;
+    return filteredSecrets.slice(start, start + pageSize);
+  }, [filteredSecrets, page, pageSize]);
 
   const loadSecrets = useCallback(async () => {
     if (!token) return;
@@ -253,6 +304,65 @@ function SecretsPage() {
       setError(msg);
       pushToast({ title: "Ошибка удаления секрета", description: msg, variant: "error" });
     }
+  };
+
+  const toggleSecretSelection = (secretId: number) => {
+    setSelectedSecretIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(secretId)) {
+        next.delete(secretId);
+      } else {
+        next.add(secretId);
+      }
+      return next;
+    });
+  };
+
+  const toggleAllSecretsOnPage = (checked: boolean) => {
+    setSelectedSecretIds((prev) => {
+      const next = new Set(prev);
+      pageItems.forEach((secret) => {
+        if (checked) {
+          next.add(secret.id);
+        } else {
+          next.delete(secret.id);
+        }
+      });
+      return next;
+    });
+  };
+
+  const bulkDeleteSecrets = async () => {
+    setError(null);
+    if (!token || !isAdmin) return;
+    const selected = secrets.filter((secret) => selectedSecretIds.has(secret.id));
+    if (selected.length === 0) {
+      pushToast({ title: "Нет выбранных секретов", description: "Выберите хотя бы один секрет.", variant: "warning" });
+      return;
+    }
+    const ok = await confirm({
+      title: "Удалить секреты?",
+      description: `Будут удалены ${selected.length} секретов.`,
+      confirmText: "Удалить",
+      cancelText: "Отмена",
+      danger: true,
+    });
+    if (!ok) return;
+    let failed = 0;
+    for (const secret of selected) {
+      try {
+        await apiFetch<void>(`/api/v1/secrets/${secret.id}`, { method: "DELETE", token });
+      } catch {
+        failed += 1;
+      }
+    }
+    setSelectedSecretIds(new Set());
+    loadSecrets().catch(() => undefined);
+    if (failed > 0) {
+      pushToast({ title: "Часть секретов не удалена", description: `Ошибок: ${failed}`, variant: "warning" });
+      return;
+    }
+    pushToast({ title: "Секреты удалены", description: `Удалено: ${selected.length}`, variant: "success" });
   };
 
   const handleEdit = (secret: Secret) => {
@@ -399,8 +509,15 @@ function SecretsPage() {
               </div>
             ))}
           </div>
-          <a className="help-link" href="/docs/user-guide.html#secrets" target="_blank" rel="noreferrer">
-            Документация
+          <a
+            className="help-link"
+            href="/docs/user-guide.html#secrets"
+            target="_blank"
+            rel="noreferrer"
+            aria-label="Справка по Secrets"
+            title="Справка по Secrets"
+          >
+            ?
           </a>
         </div>
       </header>
@@ -421,14 +538,76 @@ function SecretsPage() {
           {editId ? "Редактировать" : "Создать"}
         </button>
       </div>
+      <div className="section-nav">
+        <a href="#secrets-list">Список</a>
+        <a href="#secrets-form">Форма</a>
+      </div>
 
       {error && <p className="text-error">{error}</p>}
       <div className="grid">
         {secretsTab === "list" && (
-        <div className="panel">
+        <div className="panel section-anchor" id="secrets-list">
           <div className="panel-title">
-            <h2>Список секретов</h2>
-            <p>Значения не отображаются. Reveal доступен только admin.</p>
+            <div className="row-actions" style={{ justifyContent: "space-between", alignItems: "center" }}>
+              <div>
+                <h2>Список секретов</h2>
+                <p>Значения не отображаются. Reveal доступен только admin.</p>
+              </div>
+              <a
+                className="help-link"
+                href="/docs/user-guide.html#secrets"
+                target="_blank"
+                rel="noreferrer"
+                aria-label="Справка по Secrets"
+                title="Справка по Secrets"
+              >
+                ?
+              </a>
+            </div>
+          </div>
+          <div className="table-toolbar">
+            <div className="toolbar">
+            <input
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Поиск: имя/тип/теги"
+              aria-label="Поиск по секретам"
+            />
+            <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value as SecretType | "all")}>
+              <option value="all">все типы</option>
+              <option value="text">text</option>
+              <option value="password">password</option>
+              <option value="token">token</option>
+              <option value="private_key">private_key</option>
+            </select>
+            <select value={scopeFilter} onChange={(e) => setScopeFilter(e.target.value as SecretScope | "all")}>
+              <option value="all">все scope</option>
+              <option value="project">project</option>
+              <option value="global">global</option>
+            </select>
+            <select value={pageSize} onChange={(e) => setPageSize(Number(e.target.value))}>
+              <option value={10}>10 / стр</option>
+              <option value={25}>25 / стр</option>
+              <option value={50}>50 / стр</option>
+              <option value={100}>100 / стр</option>
+            </select>
+            <span className="form-helper">Найдено: {filteredSecrets.length}</span>
+            </div>
+            <div className="toolbar">
+              <button type="button" className="ghost-button" onClick={bulkDeleteSecrets} disabled={!isAdmin}>
+                Удалить выбранные
+              </button>
+              <span className="form-helper">Выбрано: {selectedSecretIds.size}</span>
+              <button type="button" className="ghost-button" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1}>
+                Назад
+              </button>
+              <span className="form-helper">
+                Стр. {page} / {pageTotal}
+              </span>
+              <button type="button" className="ghost-button" onClick={() => setPage((p) => Math.min(pageTotal, p + 1))} disabled={page >= pageTotal}>
+                Далее
+              </button>
+            </div>
           </div>
           {loading && <p>Загружаем...</p>}
           {!loading && secrets.length === 0 && (
@@ -448,6 +627,7 @@ function SecretsPage() {
               <table className="hosts-table">
                 <thead>
                   <tr>
+                    <th style={{ width: 40 }} />
                     <th>Название</th>
                     <th>Тип</th>
                     <th>Scope</th>
@@ -471,11 +651,22 @@ function SecretsPage() {
               </table>
             </div>
           )}
-          {secrets.length > 0 && (
+          {!loading && secrets.length > 0 && filteredSecrets.length === 0 && (
+            <p className="form-helper">По текущему фильтру секретов не найдено.</p>
+          )}
+          {pageItems.length > 0 && (
             <div className="table-scroll">
               <table className="hosts-table">
                 <thead>
                   <tr>
+                    <th style={{ width: 40 }}>
+                      <input
+                        type="checkbox"
+                        aria-label="Выбрать все секреты на странице"
+                        checked={pageItems.length > 0 && pageItems.every((secret) => selectedSecretIds.has(secret.id))}
+                        onChange={(e) => toggleAllSecretsOnPage(e.target.checked)}
+                      />
+                    </th>
                     <th>Название</th>
                     <th>Тип</th>
                     <th>Scope</th>
@@ -485,15 +676,23 @@ function SecretsPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {secrets.map((secret) => (
+                  {pageItems.map((secret) => (
                     <tr key={secret.id}>
+                      <td>
+                        <input
+                          type="checkbox"
+                          aria-label={`Выбрать секрет ${secret.name}`}
+                          checked={selectedSecretIds.has(secret.id)}
+                          onChange={() => toggleSecretSelection(secret.id)}
+                        />
+                      </td>
                       <td>{secret.name}</td>
                       <td>{secret.type}</td>
                       <td>{scopeLabel(secret)}</td>
                       <td>{secret.expires_at ? new Date(secret.expires_at).toLocaleDateString() : "—"}</td>
                       <td>{secret.next_rotated_at ? new Date(secret.next_rotated_at).toLocaleDateString() : "—"}</td>
                       <td>
-                        <div className="row-actions">
+                        <div className="row-actions compact">
                           <button
                             type="button"
                             className="ghost-button"
@@ -503,42 +702,36 @@ function SecretsPage() {
                           >
                             Редактировать
                           </button>
-                          <button
-                            type="button"
-                            className="ghost-button"
-                            disabled={!canReveal}
-                            onClick={() => handleReveal(secret)}
-                            title={canReveal ? "Раскрыть значение" : "Требуется роль admin"}
-                          >
-                            Раскрыть
-                          </button>
-                          <button
-                            type="button"
-                            className="ghost-button"
-                            disabled={!isAdmin}
-                            onClick={() => handleDelete(secret)}
-                            title={isAdmin ? "Удалить" : "Требуется роль admin"}
-                          >
-                            Удалить
-                          </button>
-                          <button
-                            type="button"
-                            className="ghost-button"
-                            disabled={!isAdmin}
-                            onClick={() => startRotate(secret)}
-                            title={isAdmin ? "Ротация секрета" : "Требуется роль admin"}
-                          >
-                            Ротация
-                          </button>
-                          <button
-                            type="button"
-                            className="ghost-button"
-                            disabled={!isAdmin || !secret.dynamic_enabled}
-                            onClick={() => issueLease(secret)}
-                            title={secret.dynamic_enabled ? "Выдать lease" : "Dynamic secrets отключены"}
-                          >
-                            Lease
-                          </button>
+                          <ActionMenu
+                            ariaLabel={`Действия для ${secret.name}`}
+                            items={[
+                              {
+                                label: "Раскрыть",
+                                onClick: () => handleReveal(secret),
+                                disabled: !canReveal,
+                                title: canReveal ? "Раскрыть значение" : "Требуется роль admin",
+                              },
+                              {
+                                label: "Ротация",
+                                onClick: () => startRotate(secret),
+                                disabled: !isAdmin,
+                                title: isAdmin ? "Ротация секрета" : "Требуется роль admin",
+                              },
+                              {
+                                label: "Lease",
+                                onClick: () => issueLease(secret),
+                                disabled: !isAdmin || !secret.dynamic_enabled,
+                                title: secret.dynamic_enabled ? "Выдать lease" : "Dynamic secrets отключены",
+                              },
+                              {
+                                label: "Удалить",
+                                onClick: () => handleDelete(secret),
+                                disabled: !isAdmin,
+                                danger: true,
+                                title: isAdmin ? "Удалить" : "Требуется роль admin",
+                              },
+                            ]}
+                          />
                         </div>
                       </td>
                     </tr>
@@ -566,121 +759,140 @@ function SecretsPage() {
         </div>
         )}
         {secretsTab === "manage" && (
-        <div className="panel">
+        <div className="panel section-anchor" id="secrets-form">
             <div className="panel-title">
             <h2>{editId ? "Редактировать секрет" : "Создать секрет"}</h2>
             <p>Значение сохранится в зашифрованном виде (AES-GCM).</p>
             </div>
           {!isAdmin && <p className="form-helper">Режим read-only: создание/редактирование/удаление доступно только admin.</p>}
           <form className="form-stack" onSubmit={handleSubmit}>
-            <label>
-              Название
-              <input value={form.name} onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))} required disabled={!isAdmin} />
-            </label>
-            <label>
-              Тип
-              <select value={form.type} onChange={(e) => setForm((prev) => ({ ...prev, type: e.target.value as SecretType }))} disabled={!isAdmin}>
-                <option value="password">password</option>
-                <option value="token">token</option>
-                <option value="text">text</option>
-                <option value="private_key">private_key</option>
-              </select>
-            </label>
-            <label>
-              Scope
-              <select
-                value={form.scope}
-                onChange={(e) => setForm((prev) => ({ ...prev, scope: e.target.value as SecretScope }))}
-                disabled={!isAdmin}
-              >
-                <option value="project">project</option>
-                <option value="global">global</option>
-              </select>
-              <span className="form-helper">project — секрет виден только в текущем проекте; global — виден во всех проектах.</span>
-            </label>
-            <label>
-              Описание
-              <input value={form.description} onChange={(e) => setForm((prev) => ({ ...prev, description: e.target.value }))} disabled={!isAdmin} />
-            </label>
-            <label>
-              Теги (key=value, ...)
-              <input value={form.tags} onChange={(e) => setForm((prev) => ({ ...prev, tags: e.target.value }))} disabled={!isAdmin} />
-            </label>
-            <label>
-              Истекает
-              <input
-                type="datetime-local"
-                value={form.expires_at}
-                onChange={(e) => setForm((prev) => ({ ...prev, expires_at: e.target.value }))}
-                disabled={!isAdmin}
-              />
-              <span className="form-helper">Оставьте пустым, если срок не задан.</span>
-            </label>
-            <label>
-              Интервал ротации (дней)
-              <input
-                type="number"
-                min={1}
-                value={form.rotation_interval_days}
-                onChange={(e) => setForm((prev) => ({ ...prev, rotation_interval_days: e.target.value }))}
-                disabled={!isAdmin}
-              />
-              <span className="form-helper">Если задан — планируется next rotation.</span>
-            </label>
-            <label className="checkbox-row">
-              <input
-                type="checkbox"
-                checked={form.dynamic_enabled}
-                onChange={(e) => setForm((prev) => ({ ...prev, dynamic_enabled: e.target.checked }))}
-                disabled={!isAdmin}
-              />
-              <span>Dynamic secret (leases)</span>
-            </label>
-            {form.dynamic_enabled && (
-              <label>
-                TTL для lease (секунды)
-                <input
-                  type="number"
-                  min={60}
-                  value={form.dynamic_ttl_seconds}
-                  onChange={(e) => setForm((prev) => ({ ...prev, dynamic_ttl_seconds: e.target.value }))}
-                  disabled={!isAdmin}
-                />
-                <span className="form-helper">Если пусто — TTL не задан, lease не выдаётся.</span>
-              </label>
-            )}
-          <label>
-            Значение
-            {form.type === "private_key" ? (
-              <textarea
-                value={form.value}
-                onChange={(e) => setForm((prev) => ({ ...prev, value: e.target.value }))}
-                rows={6}
-                style={{ background: "#0f172a", color: "#e2e8f0", borderRadius: 8, padding: "0.65rem" }}
-                disabled={!isAdmin}
-              />
-            ) : (
-                <input value={form.value} onChange={(e) => setForm((prev) => ({ ...prev, value: e.target.value }))} disabled={!isAdmin} />
-            )}
-          </label>
-          <p className="form-helper">
-              При редактировании значение не показывается; оставьте поле пустым, чтобы не менять секрет.
-          </p>
-            {form.type === "private_key" && (
-              <label>
-                Passphrase (опционально)
-                <input value={form.passphrase} onChange={(e) => setForm((prev) => ({ ...prev, passphrase: e.target.value }))} disabled={!isAdmin} />
-              </label>
-            )}
-            {error && <span className="text-error form-error">{error}</span>}
-            <button className="primary-button" type="submit" disabled={!isAdmin}>
-              {editId ? "Сохранить" : "Создать"}
-            </button>
-            {editId && (
-              <button className="ghost-button" type="button" onClick={handleReset}>
-                Отменить
+            <div className="form-grid">
+              <div className="form-section">
+                <h3>Основное</h3>
+                <div className="form-stack">
+                  <label>
+                    Название
+                    <input value={form.name} onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))} required disabled={!isAdmin} />
+                  </label>
+                  <label>
+                    Тип
+                    <select value={form.type} onChange={(e) => setForm((prev) => ({ ...prev, type: e.target.value as SecretType }))} disabled={!isAdmin}>
+                      <option value="password">password</option>
+                      <option value="token">token</option>
+                      <option value="text">text</option>
+                      <option value="private_key">private_key</option>
+                    </select>
+                  </label>
+                  <label>
+                    Scope
+                    <select
+                      value={form.scope}
+                      onChange={(e) => setForm((prev) => ({ ...prev, scope: e.target.value as SecretScope }))}
+                      disabled={!isAdmin}
+                    >
+                      <option value="project">project</option>
+                      <option value="global">global</option>
+                    </select>
+                    <span className="form-helper">project — секрет виден только в текущем проекте; global — виден во всех проектах.</span>
+                  </label>
+                  <label>
+                    Описание
+                    <input value={form.description} onChange={(e) => setForm((prev) => ({ ...prev, description: e.target.value }))} disabled={!isAdmin} />
+                  </label>
+                  <label>
+                    Теги (key=value, ...)
+                    <input value={form.tags} onChange={(e) => setForm((prev) => ({ ...prev, tags: e.target.value }))} disabled={!isAdmin} />
+                  </label>
+                </div>
+              </div>
+              <div className="form-section">
+                <h3>Сроки и политики</h3>
+                <div className="form-stack">
+                  <label>
+                    Истекает
+                    <input
+                      type="datetime-local"
+                      value={form.expires_at}
+                      onChange={(e) => setForm((prev) => ({ ...prev, expires_at: e.target.value }))}
+                      disabled={!isAdmin}
+                    />
+                    <span className="form-helper">Оставьте пустым, если срок не задан.</span>
+                  </label>
+                  <label>
+                    Интервал ротации (дней)
+                    <input
+                      type="number"
+                      min={1}
+                      value={form.rotation_interval_days}
+                      onChange={(e) => setForm((prev) => ({ ...prev, rotation_interval_days: e.target.value }))}
+                      disabled={!isAdmin}
+                    />
+                    <span className="form-helper">Если задан — планируется next rotation.</span>
+                  </label>
+                  <label className="checkbox-row">
+                    <input
+                      type="checkbox"
+                      checked={form.dynamic_enabled}
+                      onChange={(e) => setForm((prev) => ({ ...prev, dynamic_enabled: e.target.checked }))}
+                      disabled={!isAdmin}
+                    />
+                    <span>Dynamic secret (leases)</span>
+                  </label>
+                  {form.dynamic_enabled && (
+                    <label>
+                      TTL для lease (секунды)
+                      <input
+                        type="number"
+                        min={60}
+                        value={form.dynamic_ttl_seconds}
+                        onChange={(e) => setForm((prev) => ({ ...prev, dynamic_ttl_seconds: e.target.value }))}
+                        disabled={!isAdmin}
+                      />
+                      <span className="form-helper">Если пусто — TTL не задан, lease не выдаётся.</span>
+                    </label>
+                  )}
+                </div>
+              </div>
+              <div className="form-section form-span-2">
+                <h3>Значение</h3>
+                <div className="form-stack">
+                  <label>
+                    Значение
+                    {form.type === "private_key" ? (
+                      <textarea
+                        value={form.value}
+                        onChange={(e) => setForm((prev) => ({ ...prev, value: e.target.value }))}
+                        rows={6}
+                        style={{ background: "#0f172a", color: "#e2e8f0", borderRadius: 8, padding: "0.65rem" }}
+                        disabled={!isAdmin}
+                      />
+                    ) : (
+                      <input value={form.value} onChange={(e) => setForm((prev) => ({ ...prev, value: e.target.value }))} disabled={!isAdmin} />
+                    )}
+                  </label>
+                  <p className="form-helper">
+                    При редактировании значение не показывается; оставьте поле пустым, чтобы не менять секрет.
+                  </p>
+                  {form.type === "private_key" && (
+                    <label>
+                      Passphrase (опционально)
+                      <input value={form.passphrase} onChange={(e) => setForm((prev) => ({ ...prev, passphrase: e.target.value }))} disabled={!isAdmin} />
+                    </label>
+                  )}
+                </div>
+              </div>
+            </div>
+            <div className="form-actions">
+              <button className="primary-button" type="submit" disabled={!isAdmin}>
+                {editId ? "Сохранить" : "Создать"}
               </button>
-            )}
+              {editId && (
+                <button className="ghost-button" type="button" onClick={handleReset}>
+                  Отменить
+                </button>
+              )}
+            </div>
+            {error && <span className="text-error form-error">{error}</span>}
           </form>
           {rotateId && (
             <div className="panel small">

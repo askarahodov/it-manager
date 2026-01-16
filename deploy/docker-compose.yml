@@ -47,7 +47,7 @@ services:
       - backend_data:/app/data
       - ansible_workspace:/var/ansible:ro
     ports:
-      - 8000:8000
+      - 8001:8000
     healthcheck:
       test:
         [
@@ -61,9 +61,10 @@ services:
   frontend:
     build:
       context: ../apps/frontend
+      network: host
     restart: unless-stopped
     ports:
-      - 4173:80
+      - 4174:80
     depends_on:
       - backend
     healthcheck:

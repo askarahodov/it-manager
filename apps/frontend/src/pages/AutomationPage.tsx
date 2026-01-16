@@ -5,6 +5,7 @@ import { useAuth } from "../lib/auth";
 import { useConfirm } from "../components/ui/ConfirmProvider";
 import { useToast } from "../components/ui/ToastProvider";
 import EmptyState from "../components/ui/EmptyState";
+import ActionMenu from "../components/ui/ActionMenu";
 import { formatError } from "../lib/errors";
 import { getProjectId } from "../lib/project";
 
@@ -149,6 +150,20 @@ function AutomationPage() {
   const [pbRepoSyncMessage, setPbRepoSyncMessage] = useState<string | null>(null);
   const [pbRepoSyncLoading, setPbRepoSyncLoading] = useState(false);
   const [automationTab, setAutomationTab] = useState<"playbooks" | "templates" | "triggers" | "runs">("playbooks");
+  const [runFilterStatus, setRunFilterStatus] = useState<"all" | "pending" | "running" | "success" | "failed">("all");
+  const [runFilterQuery, setRunFilterQuery] = useState("");
+  const [approvalOnlyPending, setApprovalOnlyPending] = useState(true);
+  const [triggerFilterType, setTriggerFilterType] = useState<"all" | "host_created" | "host_tags_changed" | "secret_rotated">("all");
+  const [triggerFilterQuery, setTriggerFilterQuery] = useState("");
+  const [runPage, setRunPage] = useState(1);
+  const [runPageSize, setRunPageSize] = useState(25);
+  const [approvalPage, setApprovalPage] = useState(1);
+  const [approvalPageSize, setApprovalPageSize] = useState(25);
+  const [triggerPage, setTriggerPage] = useState(1);
+  const [triggerPageSize, setTriggerPageSize] = useState(25);
+  const [selectedApprovalIds, setSelectedApprovalIds] = useState<Set<number>>(new Set());
+  const [selectedTriggerIds, setSelectedTriggerIds] = useState<Set<number>>(new Set());
+  const [bulkApprovalReason, setBulkApprovalReason] = useState("");
   const [pbScheduleEnabled, setPbScheduleEnabled] = useState(false);
   const [pbScheduleType, setPbScheduleType] = useState<"interval" | "cron">("interval");
   const [pbScheduleValue, setPbScheduleValue] = useState("300");
@@ -240,6 +255,17 @@ function AutomationPage() {
       return "Некорректный JSON в extra vars.";
     }
   }, [runExtraVars]);
+
+  const automationHelpHref = useMemo(() => {
+    const base = "/docs/user-guide.html#automation";
+    const map: Record<string, string> = {
+      playbooks: `${base}-playbooks`,
+      templates: `${base}-templates`,
+      triggers: `${base}-triggers`,
+      runs: `${base}-runs`,
+    };
+    return map[automationTab] ?? base;
+  }, [automationTab]);
 
   const templateSchemaError = useMemo(() => {
     try {
@@ -921,13 +947,28 @@ function AutomationPage() {
     }
   };
 
+  const buildRunStreamUrl = (runId: number, authToken: string) => {
+    const params = new URLSearchParams({ token: authToken });
+    const projectId = getProjectId();
+    if (projectId) {
+      params.set("project_id", String(projectId));
+    }
+    return `/api/v1/runs/${runId}/stream?${params.toString()}`;
+  };
+
+  const buildArtifactUrl = (runId: number, name: string, authToken: string) => {
+    const params = new URLSearchParams({ token: authToken });
+    const projectId = getProjectId();
+    if (projectId) {
+      params.set("project_id", String(projectId));
+    }
+    return `/api/v1/runs/${runId}/artifacts/${encodeURIComponent(name)}?${params.toString()}`;
+  };
+
   useEffect(() => {
     if (!logModal.open || !logModal.run || !token) return;
     eventSourceRef.current?.close();
-    const projectId = getProjectId() ?? 1;
-    const es = new EventSource(
-      `/api/v1/runs/${logModal.run.id}/stream?token=${encodeURIComponent(token)}&project_id=${projectId}`
-    );
+    const es = new EventSource(buildRunStreamUrl(logModal.run.id, token));
     eventSourceRef.current = es;
     es.onmessage = (event) => {
       const text = (event.data as string).replaceAll("\\r", "\r").replaceAll("\\n", "\n");
@@ -964,6 +1005,48 @@ function AutomationPage() {
     return typeof status === "string" ? status : null;
   };
 
+  const getRunEffectiveStatus = (run: Run) => {
+    const approvalStatus = getApprovalStatus(run);
+    if (approvalStatus === "pending") {
+      return "pending";
+    }
+    return run.status;
+  };
+
+  const totalPages = (items: number, pageSize: number) => Math.max(1, Math.ceil(items / pageSize));
+
+  const filteredApprovals = useMemo(() => {
+    if (!approvalOnlyPending) return approvals;
+    return approvals.filter((approval) => approval.status === "pending");
+  }, [approvals, approvalOnlyPending]);
+
+  useEffect(() => {
+    setSelectedApprovalIds(new Set());
+    setApprovalPage(1);
+  }, [approvalOnlyPending, approvalPageSize, approvals.length]);
+
+  const filteredTriggers = useMemo(() => {
+    const query = triggerFilterQuery.trim().toLowerCase();
+    return triggers.filter((tr) => {
+      if (triggerFilterType !== "all" && tr.type !== triggerFilterType) {
+        return false;
+      }
+      if (!query) return true;
+      const playbookName = playbookById.get(tr.playbook_id)?.name ?? "";
+      return (
+        String(tr.id).includes(query) ||
+        String(tr.playbook_id).includes(query) ||
+        tr.type.toLowerCase().includes(query) ||
+        playbookName.toLowerCase().includes(query)
+      );
+    });
+  }, [triggers, triggerFilterType, triggerFilterQuery, playbookById]);
+
+  useEffect(() => {
+    setSelectedTriggerIds(new Set());
+    setTriggerPage(1);
+  }, [triggerFilterType, triggerFilterQuery, triggerPageSize, triggers.length]);
+
   const getRepoCommit = (run: Run) => {
     const snapshot = run.target_snapshot as Record<string, unknown>;
     const commit = snapshot?.repo_commit;
@@ -987,6 +1070,68 @@ function AutomationPage() {
     if (base.includes("bitbucket")) return `${base}/commits/${commit}`;
     return `${base}/commit/${commit}`;
   };
+
+  const filteredRuns = useMemo(() => {
+    const query = runFilterQuery.trim().toLowerCase();
+    return runs.filter((run) => {
+      const status = getRunEffectiveStatus(run);
+      if (runFilterStatus !== "all" && status !== runFilterStatus) {
+        return false;
+      }
+      if (!query) return true;
+      const playbookName = playbookById.get(run.playbook_id)?.name ?? "";
+      const commit = getRepoCommitFull(run) ?? "";
+      return (
+        String(run.id).includes(query) ||
+        String(run.playbook_id).includes(query) ||
+        run.triggered_by.toLowerCase().includes(query) ||
+        status.toLowerCase().includes(query) ||
+        playbookName.toLowerCase().includes(query) ||
+        commit.toLowerCase().includes(query)
+      );
+    });
+  }, [runs, runFilterQuery, runFilterStatus, playbookById]);
+
+  useEffect(() => {
+    setRunPage(1);
+  }, [runFilterQuery, runFilterStatus, runPageSize, runs.length]);
+
+  const approvalsTotalPages = useMemo(() => totalPages(filteredApprovals.length, approvalPageSize), [filteredApprovals.length, approvalPageSize]);
+  const triggersTotalPages = useMemo(() => totalPages(filteredTriggers.length, triggerPageSize), [filteredTriggers.length, triggerPageSize]);
+  const runsTotalPages = useMemo(() => totalPages(filteredRuns.length, runPageSize), [filteredRuns.length, runPageSize]);
+
+  useEffect(() => {
+    if (approvalPage > approvalsTotalPages) {
+      setApprovalPage(approvalsTotalPages);
+    }
+  }, [approvalPage, approvalsTotalPages]);
+
+  useEffect(() => {
+    if (triggerPage > triggersTotalPages) {
+      setTriggerPage(triggersTotalPages);
+    }
+  }, [triggerPage, triggersTotalPages]);
+
+  useEffect(() => {
+    if (runPage > runsTotalPages) {
+      setRunPage(runsTotalPages);
+    }
+  }, [runPage, runsTotalPages]);
+
+  const approvalsPageItems = useMemo(() => {
+    const start = (approvalPage - 1) * approvalPageSize;
+    return filteredApprovals.slice(start, start + approvalPageSize);
+  }, [filteredApprovals, approvalPage, approvalPageSize]);
+
+  const triggersPageItems = useMemo(() => {
+    const start = (triggerPage - 1) * triggerPageSize;
+    return filteredTriggers.slice(start, start + triggerPageSize);
+  }, [filteredTriggers, triggerPage, triggerPageSize]);
+
+  const runsPageItems = useMemo(() => {
+    const start = (runPage - 1) * runPageSize;
+    return filteredRuns.slice(start, start + runPageSize);
+  }, [filteredRuns, runPage, runPageSize]);
 
   const getApprovalTargets = (run?: Run | null) => {
     if (!run) return "—";
@@ -1090,6 +1235,171 @@ function AutomationPage() {
     }
   };
 
+  const toggleApprovalSelection = (approvalId: number) => {
+    setSelectedApprovalIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(approvalId)) {
+        next.delete(approvalId);
+      } else {
+        next.add(approvalId);
+      }
+      return next;
+    });
+  };
+
+  const toggleAllApprovalsOnPage = (checked: boolean) => {
+    setSelectedApprovalIds((prev) => {
+      const next = new Set(prev);
+      approvalsPageItems.forEach((approval) => {
+        if (checked) {
+          next.add(approval.id);
+        } else {
+          next.delete(approval.id);
+        }
+      });
+      return next;
+    });
+  };
+
+  const bulkDecideApprovals = async (decision: "approved" | "rejected") => {
+    if (!token || !isAdmin) return;
+    const selected = approvals.filter((approval) => selectedApprovalIds.has(approval.id));
+    const pending = selected.filter((approval) => approval.status === "pending");
+    if (pending.length === 0) {
+      pushToast({ title: "Нет pending approvals", description: "Выберите хотя бы один pending approval.", variant: "warning" });
+      return;
+    }
+    const ok = await confirm({
+      title: decision === "approved" ? "Подтвердить approvals?" : "Отклонить approvals?",
+      description: `Будут обработаны ${pending.length} approval(ов).`,
+      confirmText: decision === "approved" ? "Approve" : "Reject",
+      cancelText: "Отмена",
+      danger: decision === "rejected",
+    });
+    if (!ok) return;
+    let failed = 0;
+    for (const approval of pending) {
+      try {
+        const reason = bulkApprovalReason.trim() || null;
+        await apiFetch<void>(`/api/v1/approvals/${approval.id}/decision`, {
+          method: "POST",
+          token,
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status: decision, reason }),
+        });
+      } catch {
+        failed += 1;
+      }
+    }
+    setSelectedApprovalIds(new Set());
+    setBulkApprovalReason("");
+    refreshAll().catch(() => undefined);
+    if (failed > 0) {
+      pushToast({ title: "Часть approvals не обработана", description: `Ошибок: ${failed}`, variant: "warning" });
+      return;
+    }
+    pushToast({
+      title: decision === "approved" ? "Approvals подтверждены" : "Approvals отклонены",
+      description: `Обработано: ${pending.length}`,
+      variant: decision === "approved" ? "success" : "warning",
+    });
+  };
+
+  const toggleTriggerSelection = (triggerId: number) => {
+    setSelectedTriggerIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(triggerId)) {
+        next.delete(triggerId);
+      } else {
+        next.add(triggerId);
+      }
+      return next;
+    });
+  };
+
+  const toggleAllTriggersOnPage = (checked: boolean) => {
+    setSelectedTriggerIds((prev) => {
+      const next = new Set(prev);
+      triggersPageItems.forEach((trigger) => {
+        if (checked) {
+          next.add(trigger.id);
+        } else {
+          next.delete(trigger.id);
+        }
+      });
+      return next;
+    });
+  };
+
+  const bulkUpdateTriggers = async (enabled: boolean) => {
+    if (!token || !isAdmin) return;
+    const selected = triggers.filter((tr) => selectedTriggerIds.has(tr.id));
+    if (selected.length === 0) {
+      pushToast({ title: "Нет выбранных триггеров", description: "Выберите хотя бы один триггер.", variant: "warning" });
+      return;
+    }
+    const ok = await confirm({
+      title: enabled ? "Включить триггеры?" : "Отключить триггеры?",
+      description: `Будут обновлены ${selected.length} триггеров.`,
+      confirmText: enabled ? "Включить" : "Отключить",
+      cancelText: "Отмена",
+      danger: false,
+    });
+    if (!ok) return;
+    let failed = 0;
+    for (const tr of selected) {
+      try {
+        await apiFetch<void>(`/api/v1/playbook-triggers/${tr.id}`, {
+          method: "PUT",
+          token,
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ enabled }),
+        });
+      } catch {
+        failed += 1;
+      }
+    }
+    setSelectedTriggerIds(new Set());
+    refreshAll().catch(() => undefined);
+    if (failed > 0) {
+      pushToast({ title: "Часть триггеров не обновлена", description: `Ошибок: ${failed}`, variant: "warning" });
+      return;
+    }
+    pushToast({ title: enabled ? "Триггеры включены" : "Триггеры отключены", description: `Обновлено: ${selected.length}`, variant: "success" });
+  };
+
+  const bulkDeleteTriggers = async () => {
+    if (!token || !isAdmin) return;
+    const selected = triggers.filter((tr) => selectedTriggerIds.has(tr.id));
+    if (selected.length === 0) {
+      pushToast({ title: "Нет выбранных триггеров", description: "Выберите хотя бы один триггер.", variant: "warning" });
+      return;
+    }
+    const ok = await confirm({
+      title: "Удалить триггеры?",
+      description: `Будут удалены ${selected.length} триггеров.`,
+      confirmText: "Удалить",
+      cancelText: "Отмена",
+      danger: true,
+    });
+    if (!ok) return;
+    let failed = 0;
+    for (const tr of selected) {
+      try {
+        await apiFetch<void>(`/api/v1/playbook-triggers/${tr.id}`, { method: "DELETE", token });
+      } catch {
+        failed += 1;
+      }
+    }
+    setSelectedTriggerIds(new Set());
+    refreshAll().catch(() => undefined);
+    if (failed > 0) {
+      pushToast({ title: "Часть триггеров не удалена", description: `Ошибок: ${failed}`, variant: "warning" });
+      return;
+    }
+    pushToast({ title: "Триггеры удалены", description: `Удалено: ${selected.length}`, variant: "success" });
+  };
+
   if (!token || status === "anonymous") {
     return (
       <div className="page-content">
@@ -1117,8 +1427,15 @@ function AutomationPage() {
           <button type="button" className="ghost-button" onClick={refreshAll}>
             Обновить
           </button>
-          <a className="help-link" href="/docs/user-guide.html#automation" target="_blank" rel="noreferrer">
-            Документация
+          <a
+            className="help-link"
+            href={automationHelpHref}
+            target="_blank"
+            rel="noreferrer"
+            aria-label="Справка по Automation"
+            title="Справка по Automation"
+          >
+            ?
           </a>
         </div>
       </header>
@@ -1154,16 +1471,60 @@ function AutomationPage() {
         </button>
       </div>
 
+      {automationTab === "playbooks" && (
+        <div className="section-nav">
+          <a href="#playbooks-list">Плейбуки</a>
+          <a href="#playbooks-form">Редактор</a>
+          <a href="#playbooks-git">Git</a>
+          <a href="#playbooks-schedule">Расписание</a>
+          <a href="#playbooks-webhook">Webhook</a>
+        </div>
+      )}
+      {automationTab === "templates" && (
+        <div className="section-nav">
+          <a href="#templates-list">Шаблоны</a>
+          <a href="#templates-form">Создание шаблона</a>
+          <a href="#instances-list">Инстансы</a>
+          <a href="#instances-form">Создание инстанса</a>
+        </div>
+      )}
+      {automationTab === "triggers" && (
+        <div className="section-nav">
+          <a href="#triggers-list">Триггеры</a>
+          <a href="#triggers-form">Создание триггера</a>
+        </div>
+      )}
+      {automationTab === "runs" && (
+        <div className="section-nav">
+          <a href="#approvals-list">Approvals</a>
+          <a href="#runs-list">Запуски</a>
+        </div>
+      )}
+
       {error && <p className="text-error">{error}</p>}
       {loading && <p>Загружаем...</p>}
 
       {automationTab === "templates" && (
       <>
       <div className="grid">
-        <div className="panel">
+        <div className="panel section-anchor" id="templates-list">
           <div className="panel-title">
-            <h2>Шаблоны плейбуков</h2>
-            <p className="form-helper">Vars schema и defaults для будущих инстансов.</p>
+            <div className="row-actions" style={{ justifyContent: "space-between", alignItems: "center" }}>
+              <div>
+                <h2>Шаблоны плейбуков</h2>
+                <p className="form-helper">Vars schema и defaults для будущих инстансов.</p>
+              </div>
+              <a
+                className="help-link"
+                href="/docs/user-guide.html#automation-templates"
+                target="_blank"
+                rel="noreferrer"
+                aria-label="Справка по шаблонам"
+                title="Справка по шаблонам"
+              >
+                ?
+              </a>
+            </div>
           </div>
           {!loading && templates.length === 0 && (
             <EmptyState
@@ -1211,7 +1572,7 @@ function AutomationPage() {
                       <td>{tpl.name}</td>
                       <td>{tpl.description ?? ""}</td>
                       <td>
-                        <div className="row-actions">
+                        <div className="row-actions compact">
                           <button type="button" className="ghost-button" onClick={() => startEditTemplate(tpl)} disabled={!isAdmin}>
                             Редактировать
                           </button>
@@ -1228,30 +1589,55 @@ function AutomationPage() {
           )}
         </div>
 
-        <div className="panel">
+        <div className="panel section-anchor" id="templates-form">
           <div className="panel-title">
-            <h2>{editTemplateId ? "Редактировать шаблон" : "Создать шаблон"}</h2>
-            {!isAdmin && <p className="form-helper">Создание/редактирование доступно только admin.</p>}
+            <div className="row-actions" style={{ justifyContent: "space-between", alignItems: "center" }}>
+              <div>
+                <h2>{editTemplateId ? "Редактировать шаблон" : "Создать шаблон"}</h2>
+                {!isAdmin && <p className="form-helper">Создание/редактирование доступно только admin.</p>}
+              </div>
+              <a
+                className="help-link"
+                href="/docs/user-guide.html#automation-templates"
+                target="_blank"
+                rel="noreferrer"
+                aria-label="Справка по шаблонам"
+                title="Справка по шаблонам"
+              >
+                ?
+              </a>
+            </div>
           </div>
           <form className="form-stack" onSubmit={submitTemplate}>
-            <label>
-              Название
-              <input value={tplName} onChange={(e) => setTplName(e.target.value)} required minLength={3} disabled={!isAdmin} />
-            </label>
-            <label>
-              Описание
-              <input value={tplDescription} onChange={(e) => setTplDescription(e.target.value)} placeholder="Опционально" disabled={!isAdmin} />
-            </label>
-            <label>
-              Vars schema (JSON)
-              <textarea value={tplSchema} onChange={(e) => setTplSchema(e.target.value)} rows={6} style={{ resize: "vertical" }} disabled={!isAdmin} />
-              {templateSchemaError && <span className="text-error">{templateSchemaError}</span>}
-            </label>
-            <label>
-              Vars defaults (JSON)
-              <textarea value={tplDefaults} onChange={(e) => setTplDefaults(e.target.value)} rows={6} style={{ resize: "vertical" }} disabled={!isAdmin} />
-              {templateDefaultsError && <span className="text-error">{templateDefaultsError}</span>}
-            </label>
+            <div className="form-grid">
+              <div className="form-section">
+                <h3>Основное</h3>
+                <div className="form-stack">
+                  <label>
+                    Название
+                    <input value={tplName} onChange={(e) => setTplName(e.target.value)} required minLength={3} disabled={!isAdmin} />
+                  </label>
+                  <label>
+                    Описание
+                    <input value={tplDescription} onChange={(e) => setTplDescription(e.target.value)} placeholder="Опционально" disabled={!isAdmin} />
+                  </label>
+                </div>
+              </div>
+              <div className="form-section form-span-2">
+                <h3>Vars schema (JSON)</h3>
+                <div className="form-stack">
+                  <textarea value={tplSchema} onChange={(e) => setTplSchema(e.target.value)} rows={6} style={{ resize: "vertical" }} disabled={!isAdmin} />
+                  {templateSchemaError && <span className="text-error">{templateSchemaError}</span>}
+                </div>
+              </div>
+              <div className="form-section form-span-2">
+                <h3>Vars defaults (JSON)</h3>
+                <div className="form-stack">
+                  <textarea value={tplDefaults} onChange={(e) => setTplDefaults(e.target.value)} rows={6} style={{ resize: "vertical" }} disabled={!isAdmin} />
+                  {templateDefaultsError && <span className="text-error">{templateDefaultsError}</span>}
+                </div>
+              </div>
+            </div>
             <div className="form-actions">
               <button type="submit" className="primary-button" disabled={!isAdmin || Boolean(templateJsonError)}>
                 Сохранить
@@ -1266,10 +1652,24 @@ function AutomationPage() {
       </div>
 
       <div className="grid">
-        <div className="panel">
+        <div className="panel section-anchor" id="instances-list">
           <div className="panel-title">
-            <h2>Инстансы плейбуков</h2>
-            <p className="form-helper">Значения шаблонов + привязка целей. Для запуска выберите плейбук в строке.</p>
+            <div className="row-actions" style={{ justifyContent: "space-between", alignItems: "center" }}>
+              <div>
+                <h2>Инстансы плейбуков</h2>
+                <p className="form-helper">Значения шаблонов + привязка целей. Для запуска выберите плейбук в строке.</p>
+              </div>
+              <a
+                className="help-link"
+                href="/docs/user-guide.html#automation-templates"
+                target="_blank"
+                rel="noreferrer"
+                aria-label="Справка по инстансам"
+                title="Справка по инстансам"
+              >
+                ?
+              </a>
+            </div>
           </div>
           {!loading && instances.length === 0 && (
             <EmptyState
@@ -1322,38 +1722,48 @@ function AutomationPage() {
                         <td>{inst.name}</td>
                         <td>{templateName}</td>
                         <td>{(inst.host_ids?.length ?? 0) + (inst.group_ids?.length ?? 0)}</td>
-                        <td>
-                          <div className="row-actions">
-                            <select
-                              value={String(instanceRunPlaybookIds[inst.id] ?? "")}
-                              onChange={(e) =>
-                                setInstanceRunPlaybookIds((prev) => ({ ...prev, [inst.id]: e.target.value ? Number(e.target.value) : "" }))
-                              }
-                              title="Плейбук для запуска"
-                            >
-                              <option value="">плейбук…</option>
-                              {playbooks.map((pb) => (
-                                <option key={pb.id} value={pb.id}>
-                                  {pb.name}
-                                </option>
-                              ))}
-                            </select>
-                            <button type="button" className="ghost-button" onClick={() => startEditInstance(inst)} disabled={!isAdmin}>
-                              Редактировать
-                            </button>
-                            <button
-                              type="button"
-                              className="ghost-button"
-                              onClick={() => runInstance(inst)}
-                              disabled={!canRun || !instanceRunPlaybookIds[inst.id]}
-                            >
-                              Запуск
-                            </button>
-                            <button type="button" className="ghost-button" onClick={() => deleteInstance(inst)} disabled={!isAdmin}>
-                              Удалить
-                            </button>
-                          </div>
-                        </td>
+                      <td>
+                        <div className="row-actions compact">
+                          <select
+                            value={String(instanceRunPlaybookIds[inst.id] ?? "")}
+                            onChange={(e) =>
+                              setInstanceRunPlaybookIds((prev) => ({ ...prev, [inst.id]: e.target.value ? Number(e.target.value) : "" }))
+                            }
+                            title="Плейбук для запуска"
+                          >
+                            <option value="">плейбук…</option>
+                            {playbooks.map((pb) => (
+                              <option key={pb.id} value={pb.id}>
+                                {pb.name}
+                              </option>
+                            ))}
+                          </select>
+                          <button
+                            type="button"
+                            className="ghost-button"
+                            onClick={() => runInstance(inst)}
+                            disabled={!canRun || !instanceRunPlaybookIds[inst.id]}
+                          >
+                            Запуск
+                          </button>
+                          <ActionMenu
+                            ariaLabel={`Действия для ${inst.name}`}
+                            items={[
+                              {
+                                label: "Редактировать",
+                                onClick: () => startEditInstance(inst),
+                                disabled: !isAdmin,
+                              },
+                              {
+                                label: "Удалить",
+                                onClick: () => deleteInstance(inst),
+                                disabled: !isAdmin,
+                                danger: true,
+                              },
+                            ]}
+                          />
+                        </div>
+                      </td>
                       </tr>
                     );
                   })}
@@ -1363,151 +1773,179 @@ function AutomationPage() {
           )}
         </div>
 
-        <div className="panel">
+        <div className="panel section-anchor" id="instances-form">
           <div className="panel-title">
-            <h2>{editInstanceId ? "Редактировать инстанс" : "Создать инстанс"}</h2>
-            {!isAdmin && <p className="form-helper">Создание/редактирование доступно только admin.</p>}
+            <div className="row-actions" style={{ justifyContent: "space-between", alignItems: "center" }}>
+              <div>
+                <h2>{editInstanceId ? "Редактировать инстанс" : "Создать инстанс"}</h2>
+                {!isAdmin && <p className="form-helper">Создание/редактирование доступно только admin.</p>}
+              </div>
+              <a
+                className="help-link"
+                href="/docs/user-guide.html#automation-templates"
+                target="_blank"
+                rel="noreferrer"
+                aria-label="Справка по инстансам"
+                title="Справка по инстансам"
+              >
+                ?
+              </a>
+            </div>
           </div>
           <form className="form-stack" onSubmit={submitInstance}>
-            <label>
-              Название
-              <input value={instName} onChange={(e) => setInstName(e.target.value)} required minLength={3} disabled={!isAdmin} />
-            </label>
-            <label>
-              Шаблон
-              <select
-                value={String(instTemplateId)}
-                onChange={(e) => setInstTemplateId(e.target.value ? Number(e.target.value) : "")}
-                disabled={!isAdmin}
-              >
-                <option value="">—</option>
-                {templates.map((tpl) => (
-                  <option key={tpl.id} value={tpl.id}>
-                    {tpl.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Описание
-              <input value={instDescription} onChange={(e) => setInstDescription(e.target.value)} placeholder="Опционально" disabled={!isAdmin} />
-            </label>
-            <label>
-              Values (JSON)
-              {schemaProperties && instValuesObject && !instanceValuesError ? (
-                <div className="stack">
-                  {Object.entries(schemaProperties).map(([key, schema]) => {
-                    const field = (schema || {}) as Record<string, any>;
-                    const value = instValuesObject[key];
-                    const enumValues = Array.isArray(field.enum) ? field.enum.map(String) : null;
-                    const type = String(field.type || "string");
-                    const onValueChange = (nextValue: unknown) => {
-                      const updated = { ...instValuesObject, [key]: nextValue };
-                      setInstValues(JSON.stringify(updated, null, 2));
-                    };
-                    if (enumValues) {
-                      return (
-                        <label key={key}>
-                          {key}
-                          <select value={String(value ?? "")} onChange={(e) => onValueChange(e.target.value)} disabled={!isAdmin}>
-                            <option value="">—</option>
-                            {enumValues.map((opt) => (
-                              <option key={opt} value={opt}>
-                                {opt}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                      );
-                    }
-                    if (type === "number" || type === "integer") {
-                      const numericValue =
-                        typeof value === "number"
-                          ? value
-                          : typeof value === "string" && value.trim() !== "" && !Number.isNaN(Number(value))
-                            ? Number(value)
-                            : "";
-                      return (
-                        <label key={key}>
-                          {key}
-                          <input
-                            type="number"
-                            value={numericValue}
-                            onChange={(e) => onValueChange(e.target.value === "" ? "" : Number(e.target.value))}
-                            disabled={!isAdmin}
-                          />
-                        </label>
-                      );
-                    }
-                    if (type === "boolean") {
-                      return (
-                        <label key={key}>
-                          {key}
-                          <select
-                            value={value === true ? "true" : value === false ? "false" : ""}
-                            onChange={(e) => onValueChange(e.target.value === "" ? "" : e.target.value === "true")}
-                            disabled={!isAdmin}
-                          >
-                            <option value="">—</option>
-                            <option value="true">true</option>
-                            <option value="false">false</option>
-                          </select>
-                        </label>
-                      );
-                    }
-                    return (
-                      <label key={key}>
-                        {key}
-                        <input
-                          value={typeof value === "string" || typeof value === "number" ? value : value == null ? "" : String(value)}
-                          onChange={(e) => onValueChange(e.target.value)}
-                          disabled={!isAdmin}
-                        />
-                      </label>
-                    );
-                  })}
-                  <span className="form-helper">Значения синхронизируются с JSON ниже.</span>
+            <div className="form-grid">
+              <div className="form-section">
+                <h3>Основное</h3>
+                <div className="form-stack">
+                  <label>
+                    Название
+                    <input value={instName} onChange={(e) => setInstName(e.target.value)} required minLength={3} disabled={!isAdmin} />
+                  </label>
+                  <label>
+                    Шаблон
+                    <select
+                      value={String(instTemplateId)}
+                      onChange={(e) => setInstTemplateId(e.target.value ? Number(e.target.value) : "")}
+                      disabled={!isAdmin}
+                    >
+                      <option value="">—</option>
+                      {templates.map((tpl) => (
+                        <option key={tpl.id} value={tpl.id}>
+                          {tpl.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    Описание
+                    <input value={instDescription} onChange={(e) => setInstDescription(e.target.value)} placeholder="Опционально" disabled={!isAdmin} />
+                  </label>
                 </div>
-              ) : (
-                <textarea value={instValues} onChange={(e) => setInstValues(e.target.value)} rows={6} style={{ resize: "vertical" }} disabled={!isAdmin} />
-              )}
-              {instanceValuesError && <span className="text-error">{instanceValuesError}</span>}
-              {schemaProperties && instValuesObject && !instanceValuesError && (
-                <textarea value={instValues} onChange={(e) => setInstValues(e.target.value)} rows={6} style={{ resize: "vertical" }} disabled={!isAdmin} />
-              )}
-            </label>
-            <label>
-              Цели: хосты
-              <select
-                multiple
-                value={instHostIds.map(String)}
-                onChange={(e) => setInstHostIds(Array.from(e.target.selectedOptions).map((o) => Number(o.value)))}
-                style={{ minHeight: 140 }}
-                disabled={!isAdmin}
-              >
-                {hosts.map((h) => (
-                  <option key={h.id} value={h.id}>
-                    {h.name} ({h.hostname}) [{h.environment}/{h.os_type}]
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Цели: группы
-              <select
-                multiple
-                value={instGroupIds.map(String)}
-                onChange={(e) => setInstGroupIds(Array.from(e.target.selectedOptions).map((o) => Number(o.value)))}
-                style={{ minHeight: 100 }}
-                disabled={!isAdmin}
-              >
-                {groups.map((g) => (
-                  <option key={g.id} value={g.id}>
-                    {g.name} ({g.type})
-                  </option>
-                ))}
-              </select>
-            </label>
+              </div>
+              <div className="form-section form-span-2">
+                <h3>Values (JSON)</h3>
+                <div className="form-stack">
+                  {schemaProperties && instValuesObject && !instanceValuesError ? (
+                    <div className="stack">
+                      {Object.entries(schemaProperties).map(([key, schema]) => {
+                        const field = (schema || {}) as Record<string, any>;
+                        const value = instValuesObject[key];
+                        const enumValues = Array.isArray(field.enum) ? field.enum.map(String) : null;
+                        const type = String(field.type || "string");
+                        const onValueChange = (nextValue: unknown) => {
+                          const updated = { ...instValuesObject, [key]: nextValue };
+                          setInstValues(JSON.stringify(updated, null, 2));
+                        };
+                        if (enumValues) {
+                          return (
+                            <label key={key}>
+                              {key}
+                              <select value={String(value ?? "")} onChange={(e) => onValueChange(e.target.value)} disabled={!isAdmin}>
+                                <option value="">—</option>
+                                {enumValues.map((opt) => (
+                                  <option key={opt} value={opt}>
+                                    {opt}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                          );
+                        }
+                        if (type === "number" || type === "integer") {
+                          const numericValue =
+                            typeof value === "number"
+                              ? value
+                              : typeof value === "string" && value.trim() !== "" && !Number.isNaN(Number(value))
+                                ? Number(value)
+                                : "";
+                          return (
+                            <label key={key}>
+                              {key}
+                              <input
+                                type="number"
+                                value={numericValue}
+                                onChange={(e) => onValueChange(e.target.value === "" ? "" : Number(e.target.value))}
+                                disabled={!isAdmin}
+                              />
+                            </label>
+                          );
+                        }
+                        if (type === "boolean") {
+                          return (
+                            <label key={key}>
+                              {key}
+                              <select
+                                value={value === true ? "true" : value === false ? "false" : ""}
+                                onChange={(e) => onValueChange(e.target.value === "" ? "" : e.target.value === "true")}
+                                disabled={!isAdmin}
+                              >
+                                <option value="">—</option>
+                                <option value="true">true</option>
+                                <option value="false">false</option>
+                              </select>
+                            </label>
+                          );
+                        }
+                        return (
+                          <label key={key}>
+                            {key}
+                            <input
+                              value={typeof value === "string" || typeof value === "number" ? value : value == null ? "" : String(value)}
+                              onChange={(e) => onValueChange(e.target.value)}
+                              disabled={!isAdmin}
+                            />
+                          </label>
+                        );
+                      })}
+                      <span className="form-helper">Значения синхронизируются с JSON ниже.</span>
+                    </div>
+                  ) : (
+                    <textarea value={instValues} onChange={(e) => setInstValues(e.target.value)} rows={6} style={{ resize: "vertical" }} disabled={!isAdmin} />
+                  )}
+                  {instanceValuesError && <span className="text-error">{instanceValuesError}</span>}
+                  {schemaProperties && instValuesObject && !instanceValuesError && (
+                    <textarea value={instValues} onChange={(e) => setInstValues(e.target.value)} rows={6} style={{ resize: "vertical" }} disabled={!isAdmin} />
+                  )}
+                </div>
+              </div>
+              <div className="form-section form-span-2">
+                <h3>Цели</h3>
+                <div className="form-stack">
+                  <label>
+                    Цели: хосты
+                    <select
+                      multiple
+                      value={instHostIds.map(String)}
+                      onChange={(e) => setInstHostIds(Array.from(e.target.selectedOptions).map((o) => Number(o.value)))}
+                      style={{ minHeight: 140 }}
+                      disabled={!isAdmin}
+                    >
+                      {hosts.map((h) => (
+                        <option key={h.id} value={h.id}>
+                          {h.name} ({h.hostname}) [{h.environment}/{h.os_type}]
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    Цели: группы
+                    <select
+                      multiple
+                      value={instGroupIds.map(String)}
+                      onChange={(e) => setInstGroupIds(Array.from(e.target.selectedOptions).map((o) => Number(o.value)))}
+                      style={{ minHeight: 100 }}
+                      disabled={!isAdmin}
+                    >
+                      {groups.map((g) => (
+                        <option key={g.id} value={g.id}>
+                          {g.name} ({g.type})
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+              </div>
+            </div>
             <div className="form-actions">
               <button type="submit" className="primary-button" disabled={!isAdmin || Boolean(instanceValuesError)}>
                 Сохранить
@@ -1525,10 +1963,82 @@ function AutomationPage() {
 
       {automationTab === "triggers" && (
       <div className="grid">
-        <div className="panel">
+        <div className="panel section-anchor" id="triggers-list">
           <div className="panel-title">
-            <h2>Триггеры плейбуков</h2>
-            <p className="form-helper">Автозапуск по событиям: создание хоста, изменение тегов.</p>
+            <div className="row-actions" style={{ justifyContent: "space-between", alignItems: "center" }}>
+              <div>
+                <h2>Триггеры плейбуков</h2>
+                <p className="form-helper">Автозапуск по событиям: создание хоста, изменение тегов.</p>
+              </div>
+              <a
+                className="help-link"
+                href="/docs/user-guide.html#automation-triggers"
+                target="_blank"
+                rel="noreferrer"
+                aria-label="Справка по триггерам"
+                title="Справка по триггерам"
+              >
+                ?
+              </a>
+            </div>
+          </div>
+          <div className="table-toolbar">
+            <div className="toolbar">
+              <input
+                value={triggerFilterQuery}
+                onChange={(e) => setTriggerFilterQuery(e.target.value)}
+                placeholder="Поиск: id/плейбук/тип"
+              />
+              <select
+                value={triggerFilterType}
+                onChange={(e) => setTriggerFilterType(e.target.value as typeof triggerFilterType)}
+              >
+                <option value="all">все типы</option>
+                <option value="host_created">host_created</option>
+                <option value="host_tags_changed">host_tags_changed</option>
+                <option value="secret_rotated">secret_rotated</option>
+              </select>
+              <select value={triggerPageSize} onChange={(e) => setTriggerPageSize(Number(e.target.value))}>
+                <option value={10}>10 / стр</option>
+                <option value={25}>25 / стр</option>
+                <option value={50}>50 / стр</option>
+                <option value={100}>100 / стр</option>
+              </select>
+              <span className="form-helper">Найдено: {filteredTriggers.length}</span>
+            </div>
+            <div className="toolbar">
+              <button type="button" className="ghost-button" onClick={() => bulkUpdateTriggers(true)} disabled={!isAdmin}>
+                Включить выбранные
+              </button>
+              <button type="button" className="ghost-button" onClick={() => bulkUpdateTriggers(false)} disabled={!isAdmin}>
+                Отключить выбранные
+              </button>
+              <button type="button" className="ghost-button" onClick={bulkDeleteTriggers} disabled={!isAdmin}>
+                Удалить выбранные
+              </button>
+              <span className="form-helper">Выбрано: {selectedTriggerIds.size}</span>
+            </div>
+          </div>
+          <div className="table-toolbar bulk-bar">
+            <div className="toolbar">
+              <span className="form-helper">Массовые действия применяются к выбранным триггерам.</span>
+            </div>
+            <div className="toolbar">
+              <button type="button" className="ghost-button" onClick={() => setTriggerPage((p) => Math.max(1, p - 1))} disabled={triggerPage <= 1}>
+                Назад
+              </button>
+              <span className="form-helper">
+                Стр. {triggerPage} / {triggersTotalPages}
+              </span>
+              <button
+                type="button"
+                className="ghost-button"
+                onClick={() => setTriggerPage((p) => Math.min(triggersTotalPages, p + 1))}
+                disabled={triggerPage >= triggersTotalPages}
+              >
+                Далее
+              </button>
+            </div>
           </div>
           {!loading && triggers.length === 0 && (
             <EmptyState
@@ -1537,6 +2047,9 @@ function AutomationPage() {
               actionLabel="Создать триггер"
               onAction={resetTriggerForm}
             />
+          )}
+          {!loading && triggers.length > 0 && filteredTriggers.length === 0 && (
+            <p className="form-helper">По текущему фильтру триггеров не найдено.</p>
           )}
           {loading && triggers.length === 0 && (
             <div className="table-scroll">
@@ -1564,11 +2077,19 @@ function AutomationPage() {
               </table>
             </div>
           )}
-          {triggers.length > 0 && (
+          {filteredTriggers.length > 0 && (
             <div className="table-scroll">
               <table className="hosts-table">
                 <thead>
                   <tr>
+                    <th style={{ width: 40 }}>
+                      <input
+                        type="checkbox"
+                        aria-label="Выбрать все триггеры на странице"
+                        checked={triggersPageItems.length > 0 && triggersPageItems.every((tr) => selectedTriggerIds.has(tr.id))}
+                        onChange={(e) => toggleAllTriggersOnPage(e.target.checked)}
+                      />
+                    </th>
                     <th>ID</th>
                     <th>Тип</th>
                     <th>Плейбук</th>
@@ -1577,8 +2098,16 @@ function AutomationPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {triggers.map((tr) => (
+                  {triggersPageItems.map((tr) => (
                     <tr key={tr.id}>
+                      <td>
+                        <input
+                          type="checkbox"
+                          aria-label={`Выбрать триггер ${tr.id}`}
+                          checked={selectedTriggerIds.has(tr.id)}
+                          onChange={() => toggleTriggerSelection(tr.id)}
+                        />
+                      </td>
                       <td>{tr.id}</td>
                       <td>{tr.type}</td>
                       <td>{playbookById.get(tr.playbook_id)?.name ?? `#${tr.playbook_id}`}</td>
@@ -1586,13 +2115,23 @@ function AutomationPage() {
                         <span className={`status-pill ${tr.enabled ? "success" : "pending"}`}>{tr.enabled ? "enabled" : "disabled"}</span>
                       </td>
                       <td>
-                        <div className="row-actions">
-                          <button type="button" className="ghost-button" onClick={() => startEditTrigger(tr)} disabled={!isAdmin}>
-                            Редактировать
-                          </button>
-                          <button type="button" className="ghost-button" onClick={() => deleteTrigger(tr)} disabled={!isAdmin}>
-                            Удалить
-                          </button>
+                        <div className="row-actions compact">
+                          <ActionMenu
+                            ariaLabel={`Действия для триггера ${tr.id}`}
+                            items={[
+                              {
+                                label: "Редактировать",
+                                onClick: () => startEditTrigger(tr),
+                                disabled: !isAdmin,
+                              },
+                              {
+                                label: "Удалить",
+                                onClick: () => deleteTrigger(tr),
+                                disabled: !isAdmin,
+                                danger: true,
+                              },
+                            ]}
+                          />
                         </div>
                       </td>
                     </tr>
@@ -1603,57 +2142,82 @@ function AutomationPage() {
           )}
         </div>
 
-        <div className="panel">
+        <div className="panel section-anchor" id="triggers-form">
           <div className="panel-title">
-            <h2>{editTriggerId ? "Редактировать триггер" : "Создать триггер"}</h2>
-            {!isAdmin && <p className="form-helper">Создание/редактирование доступно только admin.</p>}
+            <div className="row-actions" style={{ justifyContent: "space-between", alignItems: "center" }}>
+              <div>
+                <h2>{editTriggerId ? "Редактировать триггер" : "Создать триггер"}</h2>
+                {!isAdmin && <p className="form-helper">Создание/редактирование доступно только admin.</p>}
+              </div>
+              <a
+                className="help-link"
+                href="/docs/user-guide.html#automation-triggers"
+                target="_blank"
+                rel="noreferrer"
+                aria-label="Справка по триггерам"
+                title="Справка по триггерам"
+              >
+                ?
+              </a>
+            </div>
           </div>
           <form className="form-stack" onSubmit={submitTrigger}>
-            <label>
-              Плейбук
-              <select
-                value={String(triggerPlaybookId)}
-                onChange={(e) => setTriggerPlaybookId(e.target.value ? Number(e.target.value) : "")}
-                disabled={!isAdmin}
-              >
-                <option value="">—</option>
-                {playbooks.map((pb) => (
-                  <option key={pb.id} value={pb.id}>
-                    {pb.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Тип события
-              <select
-                value={triggerType}
-                onChange={(e) => setTriggerType(e.target.value as "host_created" | "host_tags_changed" | "secret_rotated")}
-                disabled={!isAdmin}
-              >
-                <option value="host_created">host_created</option>
-                <option value="host_tags_changed">host_tags_changed</option>
-                <option value="secret_rotated">secret_rotated</option>
-              </select>
-            </label>
-            <label>
-              Статус
-              <select value={triggerEnabled ? "enabled" : "disabled"} onChange={(e) => setTriggerEnabled(e.target.value === "enabled")} disabled={!isAdmin}>
-                <option value="enabled">enabled</option>
-                <option value="disabled">disabled</option>
-              </select>
-            </label>
-            <label>
-              Filters (JSON)
-              <textarea value={triggerFilters} onChange={(e) => setTriggerFilters(e.target.value)} rows={5} style={{ resize: "vertical" }} disabled={!isAdmin} />
-              {triggerFiltersError && <span className="text-error">{triggerFiltersError}</span>}
-              <span className="form-helper">Примеры: {"{\"environments\":[\"prod\"],\"tags\":{\"role\":\"db\"}}"} или {"{\"types\":[\"password\"],\"scopes\":[\"project\"]}"}.</span>
-            </label>
-            <label>
-              Extra vars (JSON)
-              <textarea value={triggerExtraVars} onChange={(e) => setTriggerExtraVars(e.target.value)} rows={5} style={{ resize: "vertical" }} disabled={!isAdmin} />
-              {triggerVarsError && <span className="text-error">{triggerVarsError}</span>}
-            </label>
+            <div className="form-grid">
+              <div className="form-section">
+                <h3>Основное</h3>
+                <div className="form-stack">
+                  <label>
+                    Плейбук
+                    <select
+                      value={String(triggerPlaybookId)}
+                      onChange={(e) => setTriggerPlaybookId(e.target.value ? Number(e.target.value) : "")}
+                      disabled={!isAdmin}
+                    >
+                      <option value="">—</option>
+                      {playbooks.map((pb) => (
+                        <option key={pb.id} value={pb.id}>
+                          {pb.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    Тип события
+                    <select
+                      value={triggerType}
+                      onChange={(e) => setTriggerType(e.target.value as "host_created" | "host_tags_changed" | "secret_rotated")}
+                      disabled={!isAdmin}
+                    >
+                      <option value="host_created">host_created</option>
+                      <option value="host_tags_changed">host_tags_changed</option>
+                      <option value="secret_rotated">secret_rotated</option>
+                    </select>
+                  </label>
+                  <label>
+                    Статус
+                    <select value={triggerEnabled ? "enabled" : "disabled"} onChange={(e) => setTriggerEnabled(e.target.value === "enabled")} disabled={!isAdmin}>
+                      <option value="enabled">enabled</option>
+                      <option value="disabled">disabled</option>
+                    </select>
+                  </label>
+                </div>
+              </div>
+              <div className="form-section form-span-2">
+                <h3>Filters (JSON)</h3>
+                <div className="form-stack">
+                  <textarea value={triggerFilters} onChange={(e) => setTriggerFilters(e.target.value)} rows={5} style={{ resize: "vertical" }} disabled={!isAdmin} />
+                  {triggerFiltersError && <span className="text-error">{triggerFiltersError}</span>}
+                  <span className="form-helper">Примеры: {"{\"environments\":[\"prod\"],\"tags\":{\"role\":\"db\"}}"} или {"{\"types\":[\"password\"],\"scopes\":[\"project\"]}"}.</span>
+                </div>
+              </div>
+              <div className="form-section form-span-2">
+                <h3>Extra vars (JSON)</h3>
+                <div className="form-stack">
+                  <textarea value={triggerExtraVars} onChange={(e) => setTriggerExtraVars(e.target.value)} rows={5} style={{ resize: "vertical" }} disabled={!isAdmin} />
+                  {triggerVarsError && <span className="text-error">{triggerVarsError}</span>}
+                </div>
+              </div>
+            </div>
             <div className="form-actions">
               <button type="submit" className="primary-button" disabled={!isAdmin || Boolean(triggerJsonError)}>
                 Сохранить
@@ -1670,10 +2234,24 @@ function AutomationPage() {
 
       {automationTab === "playbooks" && (
       <div className="grid">
-        <div className="panel">
+        <div className="panel section-anchor" id="playbooks-list">
           <div className="panel-title">
-            <h2>Плейбуки</h2>
-            <p className="form-helper">MVP: хранение как YAML (stored_content).</p>
+            <div className="row-actions" style={{ justifyContent: "space-between", alignItems: "center" }}>
+              <div>
+                <h2>Плейбуки</h2>
+                <p className="form-helper">MVP: хранение как YAML (stored_content).</p>
+              </div>
+              <a
+                className="help-link"
+                href="/docs/user-guide.html#automation-playbooks"
+                target="_blank"
+                rel="noreferrer"
+                aria-label="Справка по Playbooks"
+                title="Справка по Playbooks"
+              >
+                ?
+              </a>
+            </div>
           </div>
           {!loading && playbooks.length === 0 && (
             <EmptyState
@@ -1741,16 +2319,26 @@ function AutomationPage() {
                       </td>
                       <td>{runsByPlaybook.get(pb.id) ?? 0}</td>
                       <td>
-                        <div className="row-actions">
-                          <button type="button" className="ghost-button" onClick={() => startEditPlaybook(pb)} disabled={!isAdmin}>
-                            Редактировать
-                          </button>
+                        <div className="row-actions compact">
                           <button type="button" className="ghost-button" onClick={() => openRunModal(pb)} disabled={!canRun}>
                             Запуск
                           </button>
-                          <button type="button" className="ghost-button" disabled={!isAdmin} onClick={() => deletePlaybook(pb)}>
-                            Удалить
-                          </button>
+                          <ActionMenu
+                            ariaLabel={`Действия для плейбука ${pb.name}`}
+                            items={[
+                              {
+                                label: "Редактировать",
+                                onClick: () => startEditPlaybook(pb),
+                                disabled: !isAdmin,
+                              },
+                              {
+                                label: "Удалить",
+                                onClick: () => deletePlaybook(pb),
+                                disabled: !isAdmin,
+                                danger: true,
+                              },
+                            ]}
+                          />
                         </div>
                       </td>
                     </tr>
@@ -1761,28 +2349,65 @@ function AutomationPage() {
           )}
         </div>
 
-        <div className="panel">
+        <div className="panel section-anchor" id="playbooks-form">
           <div className="panel-title">
-            <h2>{editPlaybookId ? "Редактировать плейбук" : "Создать плейбук"}</h2>
-            {!isAdmin && <p className="form-helper">Создание/редактирование доступно только admin.</p>}
+            <div className="row-actions" style={{ justifyContent: "space-between", alignItems: "center" }}>
+              <div>
+                <h2>{editPlaybookId ? "Редактировать плейбук" : "Создать плейбук"}</h2>
+                {!isAdmin && <p className="form-helper">Создание/редактирование доступно только admin.</p>}
+              </div>
+              <a
+                className="help-link"
+                href="/docs/user-guide.html#automation-playbooks"
+                target="_blank"
+                rel="noreferrer"
+                aria-label="Справка по Playbooks"
+                title="Справка по Playbooks"
+              >
+                ?
+              </a>
+            </div>
           </div>
           <form className="form-stack" onSubmit={submitPlaybook}>
-            <label>
-              Название
-              <input value={pbName} onChange={(e) => setPbName(e.target.value)} required minLength={2} />
-            </label>
-            <label>
-              Описание
-              <input value={pbDescription} onChange={(e) => setPbDescription(e.target.value)} placeholder="Опционально" />
-            </label>
-            <label>
-              YAML (playbook.yml)
-              <textarea value={pbYaml} onChange={(e) => setPbYaml(e.target.value)} rows={14} style={{ resize: "vertical" }} />
-            </label>
-            <div className="panel" style={{ padding: "0.75rem" }}>
+            <div className="form-grid">
+              <div className="form-section">
+                <h3>Основное</h3>
+                <div className="form-stack">
+                  <label>
+                    Название
+                    <input value={pbName} onChange={(e) => setPbName(e.target.value)} required minLength={2} />
+                  </label>
+                  <label>
+                    Описание
+                    <input value={pbDescription} onChange={(e) => setPbDescription(e.target.value)} placeholder="Опционально" />
+                  </label>
+                </div>
+              </div>
+              <div className="form-section form-span-2">
+                <h3>YAML (playbook.yml)</h3>
+                <div className="form-stack">
+                  <textarea value={pbYaml} onChange={(e) => setPbYaml(e.target.value)} rows={14} style={{ resize: "vertical" }} />
+                </div>
+              </div>
+            </div>
+            <div className="panel section-anchor" id="playbooks-git" style={{ padding: "0.75rem" }}>
               <div className="panel-title">
-                <h2>Git репозиторий</h2>
-                <p className="form-helper">Опционально: загрузка playbook.yml из репо.</p>
+                <div className="row-actions" style={{ justifyContent: "space-between", alignItems: "center" }}>
+                  <div>
+                    <h2>Git репозиторий</h2>
+                    <p className="form-helper">Опционально: загрузка playbook.yml из репо.</p>
+                  </div>
+                  <a
+                    className="help-link"
+                    href="/docs/user-guide.html#automation-playbooks"
+                    target="_blank"
+                    rel="noreferrer"
+                    aria-label="Справка по Git playbooks"
+                    title="Справка по Git playbooks"
+                  >
+                    ?
+                  </a>
+                </div>
               </div>
               <div className="form-stack" style={{ marginTop: 0 }}>
                 <label>
@@ -1845,10 +2470,24 @@ function AutomationPage() {
                 {pbRepoSyncMessage && <span className="text-error form-error">{pbRepoSyncMessage}</span>}
               </div>
             </div>
-            <div className="panel" style={{ padding: "0.75rem" }}>
+            <div className="panel section-anchor" id="playbooks-schedule" style={{ padding: "0.75rem" }}>
               <div className="panel-title">
-                <h2>Расписание (MVP)</h2>
-                <p className="form-helper">Хранится в плейбуке; выполняется воркером.</p>
+                <div className="row-actions" style={{ justifyContent: "space-between", alignItems: "center" }}>
+                  <div>
+                    <h2>Расписание (MVP)</h2>
+                    <p className="form-helper">Хранится в плейбуке; выполняется воркером.</p>
+                  </div>
+                  <a
+                    className="help-link"
+                    href="/docs/user-guide.html#automation-runs"
+                    target="_blank"
+                    rel="noreferrer"
+                    aria-label="Справка по расписаниям"
+                    title="Справка по расписаниям"
+                  >
+                    ?
+                  </a>
+                </div>
               </div>
               <div className="form-stack" style={{ marginTop: 0 }}>
                 <label>
@@ -1925,10 +2564,24 @@ function AutomationPage() {
                 </label>
               </div>
             </div>
-            <div className="panel" style={{ padding: "0.75rem" }}>
+            <div className="panel section-anchor" id="playbooks-webhook" style={{ padding: "0.75rem" }}>
               <div className="panel-title">
-                <h2>Webhook запуск</h2>
-                <p className="form-helper">Для внешних событий (HTTP POST).</p>
+                <div className="row-actions" style={{ justifyContent: "space-between", alignItems: "center" }}>
+                  <div>
+                    <h2>Webhook запуск</h2>
+                    <p className="form-helper">Для внешних событий (HTTP POST).</p>
+                  </div>
+                  <a
+                    className="help-link"
+                    href="/docs/user-guide.html#automation-triggers"
+                    target="_blank"
+                    rel="noreferrer"
+                    aria-label="Справка по webhooks"
+                    title="Справка по webhooks"
+                  >
+                    ?
+                  </a>
+                </div>
               </div>
               {!editPlaybookId && <p className="form-helper">Сохраните плейбук, чтобы сгенерировать webhook token.</p>}
               <div className="form-stack" style={{ marginTop: 0 }}>
@@ -1976,12 +2629,84 @@ function AutomationPage() {
 
       {automationTab === "runs" && (
       <>
-      <div className="panel">
+      <div className="panel section-anchor" id="approvals-list">
         <div className="panel-title">
-          <h2>Approval запросы</h2>
-          <p className="form-helper">Запуски на prod требуют подтверждения admin.</p>
+          <div className="row-actions" style={{ justifyContent: "space-between", alignItems: "center" }}>
+            <div>
+              <h2>Approval запросы</h2>
+              <p className="form-helper">Запуски на prod требуют подтверждения admin.</p>
+            </div>
+            <a
+              className="help-link"
+              href="/docs/user-guide.html#automation-runs"
+              target="_blank"
+              rel="noreferrer"
+              aria-label="Справка по approvals"
+              title="Справка по approvals"
+            >
+              ?
+            </a>
+          </div>
+        </div>
+        <div className="table-toolbar">
+          <div className="toolbar">
+            <label className="checkbox-row" style={{ margin: 0 }}>
+              <input
+                type="checkbox"
+                checked={approvalOnlyPending}
+                onChange={(e) => setApprovalOnlyPending(e.target.checked)}
+              />
+              <span>только pending</span>
+            </label>
+            <select value={approvalPageSize} onChange={(e) => setApprovalPageSize(Number(e.target.value))}>
+              <option value={10}>10 / стр</option>
+              <option value={25}>25 / стр</option>
+              <option value={50}>50 / стр</option>
+              <option value={100}>100 / стр</option>
+            </select>
+            <span className="form-helper">Найдено: {filteredApprovals.length}</span>
+          </div>
+          <div className="toolbar">
+            <input
+              value={bulkApprovalReason}
+              onChange={(e) => setBulkApprovalReason(e.target.value)}
+              placeholder="Комментарий для bulk"
+              disabled={!isAdmin}
+            />
+            <button type="button" className="ghost-button" onClick={() => bulkDecideApprovals("approved")} disabled={!isAdmin}>
+              Approve выбранные
+            </button>
+            <button type="button" className="ghost-button" onClick={() => bulkDecideApprovals("rejected")} disabled={!isAdmin}>
+              Reject выбранные
+            </button>
+            <span className="form-helper">Выбрано: {selectedApprovalIds.size}</span>
+          </div>
+        </div>
+        <div className="table-toolbar bulk-bar">
+          <div className="toolbar">
+            <span className="form-helper">Проверьте diff перед подтверждением.</span>
+          </div>
+          <div className="toolbar">
+            <button type="button" className="ghost-button" onClick={() => setApprovalPage((p) => Math.max(1, p - 1))} disabled={approvalPage <= 1}>
+              Назад
+            </button>
+            <span className="form-helper">
+              Стр. {approvalPage} / {approvalsTotalPages}
+            </span>
+            <button
+              type="button"
+              className="ghost-button"
+              onClick={() => setApprovalPage((p) => Math.min(approvalsTotalPages, p + 1))}
+              disabled={approvalPage >= approvalsTotalPages}
+            >
+              Далее
+            </button>
+          </div>
         </div>
         {approvals.length === 0 && <p>Запросов на approval пока нет</p>}
+        {!loading && approvals.length > 0 && filteredApprovals.length === 0 && (
+          <p className="form-helper">По текущему фильтру approvals не найдено.</p>
+        )}
         {loading && approvals.length === 0 && (
           <div className="table-scroll">
             <table className="hosts-table">
@@ -2014,11 +2739,19 @@ function AutomationPage() {
             </table>
           </div>
         )}
-        {approvals.length > 0 && (
+        {filteredApprovals.length > 0 && (
           <div className="table-scroll">
             <table className="hosts-table">
               <thead>
                 <tr>
+                  <th style={{ width: 40 }}>
+                    <input
+                      type="checkbox"
+                      aria-label="Выбрать все approvals на странице"
+                      checked={approvalsPageItems.length > 0 && approvalsPageItems.every((appr) => selectedApprovalIds.has(appr.id))}
+                      onChange={(e) => toggleAllApprovalsOnPage(e.target.checked)}
+                    />
+                  </th>
                   <th>ID</th>
                   <th>Run</th>
                   <th>Плейбук</th>
@@ -2030,7 +2763,7 @@ function AutomationPage() {
                 </tr>
               </thead>
               <tbody>
-                {approvals.map((approval) => {
+                {approvalsPageItems.map((approval) => {
                   const run = runs.find((item) => item.id === approval.run_id);
                   const playbookName = run ? playbookById.get(run.playbook_id)?.name ?? `#${run.playbook_id}` : "—";
                   const decisionDisabled = !isAdmin || approval.status !== "pending";
@@ -2038,6 +2771,14 @@ function AutomationPage() {
                   const diffCounts = getDiffCounts(diff);
                   return (
                     <tr key={approval.id}>
+                      <td>
+                        <input
+                          type="checkbox"
+                          aria-label={`Выбрать approval ${approval.id}`}
+                          checked={selectedApprovalIds.has(approval.id)}
+                          onChange={() => toggleApprovalSelection(approval.id)}
+                        />
+                      </td>
                       <td>{approval.id}</td>
                       <td>{approval.run_id}</td>
                       <td>{playbookName}</td>
@@ -2070,23 +2811,23 @@ function AutomationPage() {
                         ) : "—"}
                       </td>
                       <td>
-                        <div className="row-actions">
-                          <button
-                            type="button"
-                            className="ghost-button"
-                            onClick={() => decideApproval(approval, "approved")}
-                            disabled={decisionDisabled}
-                          >
-                            Approve
-                          </button>
-                          <button
-                            type="button"
-                            className="ghost-button"
-                            onClick={() => decideApproval(approval, "rejected")}
-                            disabled={decisionDisabled}
-                          >
-                            Reject
-                          </button>
+                        <div className="row-actions compact">
+                          <ActionMenu
+                            ariaLabel={`Действия для approval ${approval.id}`}
+                            items={[
+                              {
+                                label: "Approve",
+                                onClick: () => decideApproval(approval, "approved"),
+                                disabled: decisionDisabled,
+                              },
+                              {
+                                label: "Reject",
+                                onClick: () => decideApproval(approval, "rejected"),
+                                disabled: decisionDisabled,
+                                danger: true,
+                              },
+                            ]}
+                          />
                         </div>
                       </td>
                     </tr>
@@ -2098,12 +2839,63 @@ function AutomationPage() {
         )}
       </div>
 
-      <div className="panel">
+      <div className="panel section-anchor" id="runs-list">
         <div className="panel-title">
-          <h2>История запусков</h2>
-          <p className="form-helper">Live-лог: SSE `/runs/:id/stream`.</p>
+          <div className="row-actions" style={{ justifyContent: "space-between", alignItems: "center" }}>
+            <div>
+              <h2>История запусков</h2>
+              <p className="form-helper">Live-лог: SSE `/runs/:id/stream`.</p>
+            </div>
+            <a
+              className="help-link"
+              href="/docs/user-guide.html#automation-runs"
+              target="_blank"
+              rel="noreferrer"
+              aria-label="Справка по run history"
+              title="Справка по run history"
+            >
+              ?
+            </a>
+          </div>
+        </div>
+        <div className="table-toolbar">
+          <div className="toolbar">
+            <input
+              value={runFilterQuery}
+              onChange={(e) => setRunFilterQuery(e.target.value)}
+              placeholder="Поиск: id/плейбук/commit/actor"
+            />
+            <select value={runFilterStatus} onChange={(e) => setRunFilterStatus(e.target.value as typeof runFilterStatus)}>
+              <option value="all">все статусы</option>
+              <option value="pending">pending</option>
+              <option value="running">running</option>
+              <option value="success">success</option>
+              <option value="failed">failed</option>
+            </select>
+            <select value={runPageSize} onChange={(e) => setRunPageSize(Number(e.target.value))}>
+              <option value={10}>10 / стр</option>
+              <option value={25}>25 / стр</option>
+              <option value={50}>50 / стр</option>
+              <option value={100}>100 / стр</option>
+            </select>
+            <span className="form-helper">Найдено: {filteredRuns.length}</span>
+          </div>
+          <div className="toolbar">
+            <button type="button" className="ghost-button" onClick={() => setRunPage((p) => Math.max(1, p - 1))} disabled={runPage <= 1}>
+              Назад
+            </button>
+            <span className="form-helper">
+              Стр. {runPage} / {runsTotalPages}
+            </span>
+            <button type="button" className="ghost-button" onClick={() => setRunPage((p) => Math.min(runsTotalPages, p + 1))} disabled={runPage >= runsTotalPages}>
+              Далее
+            </button>
+          </div>
         </div>
         {runs.length === 0 && <p>Запусков пока нет</p>}
+        {!loading && runs.length > 0 && filteredRuns.length === 0 && (
+          <p className="form-helper">По текущему фильтру запусков не найдено.</p>
+        )}
         {loading && runs.length === 0 && (
           <div className="table-scroll">
             <table className="hosts-table">
@@ -2134,7 +2926,7 @@ function AutomationPage() {
             </table>
           </div>
         )}
-        {runs.length > 0 && (
+        {filteredRuns.length > 0 && (
           <div className="table-scroll">
             <table className="hosts-table">
               <thead>
@@ -2149,7 +2941,7 @@ function AutomationPage() {
                 </tr>
               </thead>
               <tbody>
-                {runs.map((r) => (
+                {runsPageItems.map((r) => (
                   <tr key={r.id}>
                     <td>{r.id}</td>
                     <td>{playbookById.get(r.playbook_id)?.name ?? `#${r.playbook_id}`}</td>
@@ -2311,7 +3103,7 @@ function AutomationPage() {
                     {artifacts.map((a) => (
                       <a
                         key={a.name}
-                        href={`/api/v1/runs/${logModal.run!.id}/artifacts/${encodeURIComponent(a.name)}?token=${encodeURIComponent(token)}&project_id=${getProjectId() ?? 1}`}
+                        href={buildArtifactUrl(logModal.run!.id, a.name, token)}
                         className="ghost-button"
                         style={{ marginRight: 8, display: "inline-block", padding: "0.25rem 0.5rem" }}
                         target="_blank"
